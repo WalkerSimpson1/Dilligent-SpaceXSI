@@ -88,6 +88,7 @@ Branch `feat/decide`. Start it against hand-built pictures.
 - 4.5 **A fixed priority order for reason codes**, so the same code wins on every run.
 - 4.6 **Reason text templates:** 2–4 sentences built from this hit's own facts, e.g. "The customer was born 2004-05-19 (CUS-…); the earliest dated report is 2011-03-02 (H-…), when they were 6."
 - 4.7 **Evidence:** cite only the IDs behind the deciding check, not everything that was looked at.
+- 4.8 **Missing facts:** for every REVIEW, record which facts are missing or conflicting (e.g. `NO_CUSTOMER_DOB`, `KYC_EXPIRED`, `AMBIGUOUS_HOLDER`, `COUNTRY_CONFLICT_NAME_DOB_AGREE`). This stays internal, is NOT written to `dev.jsonl`, and is used by Step 7.
 
 ## Step 5: Evaluation and QA (`tools/`)
 Branch `feat/eval`. Start on day one, because it is how everyone measures progress.
@@ -104,6 +105,23 @@ Branch `docs/readme`.
 - 6.1 `system/README.md`: architecture diagram, how each side is resolved, the `Fact`/evidence model, determinism (rule-based; any model calls at temperature 0 with a cache), model and cost, and the time per run.
 - 6.2 Three worked cases (a mismatch, a match and a review case), taken from the dev output.
 - 6.3 Submission hygiene: **the repo is public and has the data in its history.** Purge `datasets/` with `git filter-repo` (or submit from a fresh repo), make sure no API key is committed, and generate `output/dev.jsonl` with the final system.
+
+## Step 7: Analyst extras: explain command and info-request emails
+Branch `feat/extras`. Build it late, by whoever finishes first. **Rule: nothing here may change `output/dev.jsonl` or the graded `system/run`.**
+
+- 7.1 `system/screen` command with subcommands, kept separate from the graded `system/run <data> <out>`:
+  - `system/screen explain <hit_id>`: prints the customer and hit pictures, every check that fired or didn't, and the evidence IDs.
+  - `system/screen emails <output.jsonl> --out emails/`: drafts emails for REVIEW hits.
+- 7.2 **Email recipients and tipping off:** drafts go to the internal analyst or KYC team. A customer-facing version must be a neutral "please update your details" request that **never mentions screening, watchlists, sanctions or PEPs**, because telling a customer can count as tipping off under anti-money-laundering rules.
+- 7.3 **One template per missing fact (from 4.8):**
+  - no date of birth on file → request date of birth / ID document
+  - verified KYC check expired or rejected → request an identity refresh
+  - several people fit the alert → ask the analyst to confirm which account holder was screened
+  - name and date of birth agree but countries differ → request proof of address history
+  - single-part or placeholder name → request the full legal name
+- 7.4 Every draft names the alert, hit and customer record IDs, the facts already known (with their source IDs) and exactly what is needed to settle the hit.
+- 7.5 Drafts are written as `.txt`/`.eml` files and **never sent**. Generation is deterministic and template-based (no language model), so the output is the same on every run.
+- 7.6 Cover it in the README (Step 6) as showing the system is honest about what's missing.
 
 ---
 
@@ -127,3 +145,4 @@ git worktree add ../dsx-eval      -b feat/eval
 | C | Step 2 customer resolution |
 | D | Step 3 (3.1–3.3, 3.5) hit profile |
 | E | Step 5 eval, then step 4 decision engine with A |
+| First free | Step 7 extras |
