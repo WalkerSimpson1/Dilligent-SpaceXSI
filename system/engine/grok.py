@@ -1,5 +1,6 @@
 """Optional evidence extraction from the first paragraph of a watchlist profile."""
 
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -118,26 +119,37 @@ def _birth_years_from_age(age_text, event_text):
                          for year in (event.year - age - 1, event.year - age) if year >= 1500}))
 
 
-def _checked_quotes(paragraph, listing_names, payload):
-    if not isinstance(payload, dict) or set(payload) != {'quotes', 'ambiguous'} or payload['ambiguous'] is not False:
-        return ()
-    quotes = payload['quotes']
-    if not isinstance(quotes, list) or not 1 <= len(quotes) <= 4 or any(not isinstance(q, str) for q in quotes):
-        return ()
-    names = tuple(words(name) for name in listing_names)
+@dataclass(frozen=True)
+class ProfileBirthEvidence:
+    quotes: frozenset[str]
+    dates: tuple[PartialDate, ...]
+
+
+def profile_birth_evidence(paragraph, listing_names):
+    """Find all candidate quotes Python could verify before sending a request."""
+    if not paragraph or len(paragraph) > MAX_PARAGRAPH:
+        return None
     sentences = {part.strip() for part in re.split(r'(?<=[.!?])\s+|\n', paragraph) if part.strip()}
-    cited = set(quotes)
-    if not cited <= sentences:
-        return ()
-    if any(BIRTH_MARKER.search(part) or AGE.search(part) or MORE_CUES.search(part) for part in sentences - cited):
-        return ()
+    candidates = frozenset(part for part in sentences
+                           if BIRTH_MARKER.search(part) or AGE.search(part) or MORE_CUES.search(part))
+    if not 1 <= len(candidates) <= 4:
+        return None
+    names = tuple(words(name) for name in listing_names)
     recovered = set()
-    for quote in cited:
-        candidates = _quote_dates(quote, names)
-        if not candidates:
-            return ()
-        recovered.update(candidates)
-    return tuple(sorted(recovered))
+    for quote in candidates:
+        dates_in_quote = _quote_dates(quote, names)
+        if not dates_in_quote:
+            return None
+        recovered.update(dates_in_quote)
+    return ProfileBirthEvidence(candidates, tuple(sorted(recovered)))
+
+
+def _confirmed_quotes(evidence, payload):
+    if not isinstance(payload, dict) or set(payload) != {'quotes', 'ambiguous'} or payload['ambiguous'] is not False:
+        return False
+    quotes = payload['quotes']
+    return (isinstance(quotes, list) and len(quotes) == len(evidence.quotes)
+            and all(isinstance(quote, str) for quote in quotes) and set(quotes) == evidence.quotes)
 
 
 class GrokProfileFallback:
@@ -152,12 +164,15 @@ class GrokProfileFallback:
         self.disabled = False
         self.cache = {}
 
-    def birth_dates(self, paragraph, listing_names):
+    def birth_dates(self, paragraph, listing_names, *, evidence=None):
         listing_names = tuple(listing_names)
         cache_key = (paragraph, listing_names)
         if cache_key in self.cache:
             return self.cache[cache_key]
-        if not paragraph or len(paragraph) > MAX_PARAGRAPH or self.disabled or self.requests >= MAX_CALLS:
+        if self.disabled or self.requests >= MAX_CALLS:
+            return ()
+        evidence = evidence if evidence is not None else profile_birth_evidence(paragraph, listing_names)
+        if evidence is None:
             return ()
 
         request = Request(
@@ -186,7 +201,7 @@ class GrokProfileFallback:
             if answer['finish_reason'] != 'stop':
                 raise ValueError('Incomplete model response')
             payload = json.loads(answer['message']['content'])
-            recovered = _checked_quotes(paragraph, listing_names, payload)
+            recovered = evidence.dates if _confirmed_quotes(evidence, payload) else ()
         except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
             self.errors += 1
             self.consecutive_errors += 1

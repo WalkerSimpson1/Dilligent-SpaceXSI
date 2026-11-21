@@ -12,10 +12,11 @@ from engine.s2_customers import Customers
 from engine.s3_hit_facts import DateEvidence, build_hit, date_evidence, first_profile_paragraph, query_key
 from engine.s1_load import Dataset, InputError, index, list_values, value
 from engine.s4_decide import CLEAR, CODES, REVIEW, Decision, Finding, decide
-from engine.grok import configured_grok
+from engine.grok import configured_grok, profile_birth_evidence
 
 
 OUTPUT_FIELDS = {'alert_id', 'hit_id', 'decision', 'reason_code', 'customer_record_id', 'reason', 'evidence'}
+GROK_DOB_REASONS = {'DOB_MISMATCH', 'NAME_DOB_MATCH', 'NAME_DOB_LOCATION_MATCH'}
 
 
 class Batch:
@@ -48,18 +49,25 @@ class Batch:
             _, customers, hit, screened = self.evidence(hit_id)
             baseline = decide(customers, hit, screened, self.data.names, alert_id=alert_id)
             if (self.grok is None or baseline.finding.decision != REVIEW or hit.kind != 'person'
-                    or hit.dob.values or not any(customer.dob.values and not customer.dob.uncertain
-                                                 for customer in customers if customer.kind == 'person')):
+                    or hit.dob.values or len(customers) != 1):
+                return baseline
+            customer, = customers
+            if customer.kind != 'person' or not customer.dob.values or customer.dob.uncertain:
                 return baseline
             row = self.data.hits[hit_id]
             notes = value(row, 'profile_notes')
             if list_values(row, 'dobs') or (self.data.mode == 'csv' and len(notes) >= 32000):
                 return baseline
-            recovered = self.grok.birth_dates(first_profile_paragraph(notes), hit.names)
-            if not recovered:
+            paragraph = first_profile_paragraph(notes)
+            profile = profile_birth_evidence(paragraph, hit.names)
+            if profile is None:
                 return baseline
-            enriched = replace(hit, dob=DateEvidence(recovered, (hit.id,)), problems=())
-            return decide(customers, enriched, screened, self.data.names, alert_id=alert_id)
+            enriched = replace(hit, dob=DateEvidence(profile.dates, (hit.id,)), problems=())
+            preview = decide(customers, enriched, screened, self.data.names, alert_id=alert_id)
+            if preview.finding.code not in GROK_DOB_REASONS:
+                return baseline
+            confirmed = self.grok.birth_dates(paragraph, hit.names, evidence=profile)
+            return preview if confirmed == profile.dates else baseline
         except Exception as exc:
             self.fallbacks.add(hit_id)
             print(f'Hit {hit_id!r} evaluation failed ({type(exc).__name__})', file=sys.stderr)

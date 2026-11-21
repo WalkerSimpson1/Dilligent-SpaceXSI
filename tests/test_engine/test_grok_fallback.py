@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from .test_screening import save, scenario
+from .test_screening import customer, save, scenario
 
 from engine import grok
 from engine.s1_load import Dataset
@@ -118,6 +118,41 @@ class GrokFallbackTests(unittest.TestCase):
         opener = Mock()
         row = self.row(quote, opener, dobs=['1961'])
         self.assertEqual(row['decision'], 'DIFFERENT_ENTITY')
+        opener.assert_not_called()
+
+    def test_skips_reports_and_unverifiable_birth_evidence(self):
+        for paragraph in (
+            'Alex Morgan was mentioned in a report published in 2018.',
+            'Alex Morgan was born in a year the authorities withheld.',
+            'Alex Morgan was born in nineteen sixty-one. An alternate birth year is unconfirmed.',
+            'The wife of Alex Morgan was born in nineteen sixty-one.',
+        ):
+            with self.subTest(paragraph=paragraph):
+                opener = Mock()
+                row = self.row(paragraph, opener)
+                self.assertEqual(row['decision'], 'REVIEW')
+                opener.assert_not_called()
+
+    def test_skips_a_birth_date_that_cannot_settle_the_hit_on_dob(self):
+        for quote, countries in (
+            ('Alex Morgan was born in nineteen ninety-five.', ['GB']),
+            ('Alex Morgan was born in nineteen ninety-four.', ['US']),
+            ('Alex Morgan was born in nineteen ninety-five.', ['US']),
+        ):
+            with self.subTest(quote=quote, countries=countries):
+                opener = Mock()
+                row = self.row(quote, opener, countries=countries)
+                self.assertEqual(row['decision'], 'REVIEW')
+                opener.assert_not_called()
+
+    def test_skips_unresolved_customer_identity(self):
+        table = scenario(profile_notes='Alex Morgan was born in nineteen sixty-one.')
+        table['customers'].append(customer('C2', dob='1970-02-03'))
+        table['accounts'].append(dict(account_id='ACC1', customer_id='C2', login_handle='alex2'))
+        opener = Mock()
+        client = grok.GrokProfileFallback('test-token', grok.DEFAULT_MODEL, opener=opener)
+        row, = self.batch(table, client).rows()
+        self.assertEqual((row['decision'], row['customer_record_id']), ('REVIEW', 'AMBIGUOUS'))
         opener.assert_not_called()
 
     def test_keeps_the_request_budget_and_caches_repeat_profiles(self):
