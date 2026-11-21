@@ -3,7 +3,7 @@
     python tools/check_customers.py [data folder]
 
 Standard library only. For each practice label: the expected customer record(s), or
-AMBIGUOUS, against what system/customer.py resolves.
+AMBIGUOUS, against what system/steps/customer.py resolves.
 """
 import os
 import sys
@@ -12,8 +12,8 @@ from collections import Counter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "system"))
 
-import customer  # noqa: E402
-from data import load  # noqa: E402
+from steps import customer  # noqa: E402
+from steps.data import load  # noqa: E402
 
 
 def main(folder):

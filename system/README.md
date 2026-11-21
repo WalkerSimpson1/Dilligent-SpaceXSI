@@ -12,18 +12,18 @@ system/run /path/to/dev output/dev.jsonl
 
 # Reproduce the available local run
 system/run --format csv datasets output/dev.jsonl
-system/score output/dev.jsonl 'datasets/Screening Dev Set - browse - Practice labels.csv'
+tools/score output/dev.jsonl 'datasets/Screening Dev Set - browse - Practice labels.csv'
 
 # Compare with the same rules before optional free-text evidence extraction
 system/run --format csv --structured-only datasets output/structured.jsonl
-system/score output/structured.jsonl 'datasets/Screening Dev Set - browse - Practice labels.csv'
+tools/score output/structured.jsonl 'datasets/Screening Dev Set - browse - Practice labels.csv'
 
 # Run tests and the fictional review
 python3 -m unittest discover -s tests -v   # includes our Step 1-3 tests
-system/review --demo
+tools/review --demo
 
 # Inspect a local hit with an optional hypothetical DOB from its original listing
-system/review datasets HIT_ID --listing-dob 1994-07-12 --listing-dob unknown
+tools/review datasets HIT_ID --listing-dob 1994-07-12 --listing-dob unknown
 ```
 
 `run` detects the local CSV layout if the JSONL alert table is absent. Use `--format` to select a particular adapter when both are present. The JSONL input expects the eight tables identified in the brief, `POLICY.md` and `name_variants.json`. The rules implement the v3 procedure and the name tables are read from the supplied data folder. The `score` command is the only command that reads practice labels.
@@ -32,11 +32,11 @@ Outputs in `output/` are ignored by Git. The local predictions use participant-p
 
 ## How a decision gets made
 
-`inputs.py` reconciles each alert’s hit inventory. `customers.py` resolves plausible customer records once per alert. It follows account, login, and email links, uses screened details where prescribed, and joins identity checks through both account and customer. Supported shared phone and full-DOB pairs and approved document numbers link records for the same person. The latest eligible verification is used for the facts it establishes. Distinct plausible customers are evaluated separately.
+`engine/s1_load.py` reconciles each alert’s hit inventory. `engine/s2_customers.py` resolves plausible customer records once per alert. It follows account, login, and email links, uses screened details where prescribed, and joins identity checks through both account and customer. Supported shared phone and full-DOB pairs and approved document numbers link records for the same person. The latest eligible verification is used for the facts it establishes. Distinct plausible customers are evaluated separately.
 
-`facts.py` collects hit evidence in policy order. It preserves incomplete dates and different possible birth years. The search fallback requires the hit’s category phrase and a country attributable to the listed subject. An age in a dated report can give two birth years. `normalize.py` implements date, name, and country comparisons. The country table contains ISO codes and English names from the local pycountry and IANA zoneinfo data, with explicit aliases for common terms and nationalities.
+`engine/s3_hit_facts.py` collects hit evidence in policy order. It preserves incomplete dates and different possible birth years. The search fallback requires the hit’s category phrase and a country attributable to the listed subject. An age in a dated report can give two birth years. `engine/normalize.py` implements date, name, and country comparisons. The country table contains ISO codes and English names from the local pycountry and IANA zoneinfo data, with explicit aliases for common terms and nationalities.
 
-`policy.py` records a clearance only when a permitted contradiction survives the comparisons for each plausible customer. It uses the same predicates to replay the evidence, renders the reason from the selected findings, and includes the source IDs used. If the candidate verdicts disagree, the hit stays open for review. `runner.py` checks keys, evidence IDs and reason-code pairs before replacing the output file. Stable input ID ordering and fixed reason selection make reruns reproducible. The reviewer can inspect the actual reasons and source IDs, then replay an explicitly hypothetical listing DOB in a separate scenario.
+`engine/s4_decide.py` records a clearance only when a permitted contradiction survives the comparisons for each plausible customer. It uses the same predicates to replay the evidence, renders the reason from the selected findings, and includes the source IDs used. If the candidate verdicts disagree, the hit stays open for review. `engine/s5_batch.py` checks keys, evidence IDs and reason-code pairs before replacing the output file. Stable input ID ordering and fixed reason selection make reruns reproducible. The reviewer can inspect the actual reasons and source IDs, then replay an explicitly hypothetical listing DOB in a separate scenario.
 
 ## Three fictional cases
 
@@ -44,11 +44,11 @@ Outputs in `output/` are ignored by Git. The local predictions use participant-p
 |---|---|
 | **Clear** | An approved identity check gives Alex Morgan a birth date in 1994. The original listing gives 1961 as the only candidate birth year. The dates contradict under the policy. The result is `DIFFERENT_ENTITY` with `DOB_MISMATCH`. |
 | **Match** | The original listing instead gives 12 July 1994. The customer’s verified name and DOB agree with the listing, both are linked to the United Kingdom, and the other checks pass. The result is `SAME_ENTITY` with `NAME_DOB_LOCATION_MATCH`. |
-| **Review** | A same-name search result includes a birth year, but gives no country that ties it to the listing. The program keeps the hit open and suggests checking the birth date in the original listing. `system/review --demo` shows the current review followed by all three conditional outcomes. |
+| **Review** | A same-name search result includes a birth year, but gives no country that ties it to the listing. The program keeps the hit open and suggests checking the birth date in the original listing. `tools/review --demo` shows the current review followed by all three conditional outcomes. |
 
 ## Local verification results
 
-After merging with Steps 1-3 (DECISIONS.md R1-R7) the full CSV run produces 819 hit decisions across 440 alerts: 457 different-entity decisions, 121 matches and 241 reviews (Sam's evaluator alone: 447 / 112 / 260), in about 75 seconds. Runs from different working directories produce byte-identical JSONL. 117 tests pass (Sam's synthetic acceptance cases, the Step 1-3 unit tests and the merge tests). The table below is from the evaluator before the merge; after it, the full evaluator still scores 50 of 50 with 0 unsafe clearances and 49 of 50 reference evidence sets.
+After merging with Steps 1-3 (docs/plan/DECISIONS.md R1-R7) the full CSV run produces 819 hit decisions across 440 alerts: 457 different-entity decisions, 121 matches and 241 reviews (Sam's evaluator alone: 447 / 112 / 260), in about 75 seconds. Runs from different working directories produce byte-identical JSONL. 117 tests pass (Sam's synthetic acceptance cases, the Step 1-3 unit tests and the merge tests). The table below is from the evaluator before the merge; after it, the full evaluator still scores 50 of 50 with 0 unsafe clearances and 49 of 50 reference evidence sets.
 
 | Practice-set measure | Structured-only baseline | Full evaluator |
 |---|---:|---:|

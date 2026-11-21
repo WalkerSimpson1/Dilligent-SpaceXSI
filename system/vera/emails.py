@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Optional
 
-from data import Data, as_list
-from model import REVIEW, Decision
+from steps.data import Data, as_list
+from steps.model import REVIEW, Decision
 
 REVIEW_TEAM = "screening-review@bank.example"
 SENDER = "vera@bank.example"

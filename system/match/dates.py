@@ -21,7 +21,7 @@ from __future__ import annotations
 import calendar
 import re
 
-from model import PartialDate
+from steps.model import PartialDate
 
 MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,

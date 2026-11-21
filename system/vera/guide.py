@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from model import CHECK_ORDER, Decision
+from steps.model import CHECK_ORDER, Decision
 
 from . import term, widgets
 from .term import c

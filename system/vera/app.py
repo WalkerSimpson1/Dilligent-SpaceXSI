@@ -25,9 +25,9 @@ from collections import Counter
 from datetime import datetime
 from typing import Optional
 
-from data import Data, as_list, load, search_query
-from main import decide_all, write_output
-from model import DIFFERENT, REVIEW, SAME, Decision
+from steps.data import Data, as_list, load, search_query
+from steps.main import decide_all, write_output
+from steps.model import DIFFERENT, REVIEW, SAME, Decision
 
 from . import emails, guide, splash, term, widgets
 from .term import Quit, c

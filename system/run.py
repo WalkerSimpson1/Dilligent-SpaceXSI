@@ -5,6 +5,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # works under python -I
 
-from runner import main  # noqa: E402
+from engine.s5_batch import main  # noqa: E402
 
 raise SystemExit(main())

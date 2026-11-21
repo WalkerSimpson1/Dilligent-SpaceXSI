@@ -72,34 +72,34 @@ It is confirmed only when **name and date of birth agree** (or name and country,
 
 ```mermaid
 flowchart LR
-    A[("alerts")] --> C
+    A[("alerts")] --> L["1 · s1_load.py<br/>read + check tables"] --> C
     subgraph customer["Who is the customer?"]
-        C["Step 2<br/>Customer resolution"]
+        C["2 · s2_customers.py<br/>Customer resolution"]
         CRM[("CRM · accounts ·<br/>onboarding · KYC · notes")] --> C
     end
     subgraph listed["Who is the listed person?"]
-        H["Step 3<br/>Hit profile"]
+        H["3 · s3_hit_facts.py<br/>Hit facts"]
         W[("hits · search results")] --> H
     end
-    A --> H
-    C -- CustomerPicture --> D
-    H -- HitPicture --> D
-    D["Step 4<br/>Decision engine"] --> O[/"output/dev.jsonl<br/>decision · reason code · reason · evidence"/]
-    M["Step 1 · shared matchers<br/>names · dates · countries"] -.-> C
+    L --> H
+    C -- Customer --> D
+    H -- HitFacts --> D
+    D["4 · s4_decide.py<br/>Decision engine"] --> V["5 · s5_batch.py<br/>verify every row"] --> O[/"output/dev.jsonl<br/>decision · reason code · reason · evidence"/]
+    M["match/ + normalize.py<br/>names · dates · countries"] -.-> C
     M -.-> H
     M -.-> D
 
     classDef step fill:#0A1A3A,stroke:#19C3A6,color:#fff
     classDef data fill:#13284F,stroke:#13284F,color:#fff
     classDef out fill:#19C3A6,stroke:#19C3A6,color:#0A1A3A
-    class C,H,D,M step
+    class L,C,H,D,V,M step
     class A,CRM,W data
     class O out
 ```
 
 - **Every fact carries its source.** A date of birth is stored with the ID of the record it came from (`KYC-…`, `NOTE-…`, `H-…`, `SR-…`), so the decision can cite exactly the records that decided it.
 - **Deterministic.** Standard-library Python with fixed rules and fixed tables: the same input gives the same output on every run.
-- **Fails safe.** If anything crashes on a hit, that hit goes to `REVIEW`, never to a clearance.
+- **Fails loudly, never partially.** Every output row is checked (one row per hit, valid reason code, cited IDs exist) before the file is replaced; a structural problem stops the run with an error instead of writing a partial file.
 
 ## Quick start
 
@@ -148,51 +148,60 @@ Vera never changes the graded output (`system/run`, `output/dev.jsonl`). Its fil
 
 ## Project status
 
-The work plan with every step is in [`steps.txt`](steps.txt).
+The work plan with every step is in [`docs/plan/steps.txt`](docs/plan/steps.txt); how the two codebases were merged is in [`docs/plan/DECISIONS.md`](docs/plan/DECISIONS.md) (R1–R7).
 
 | Step | What | Status |
 |---|---|---|
-| 0 | Foundation: entry point, data loader, shared data model | ✅ On `main` |
-| 1 | Shared matchers: names, dates, countries | ✅ On `main` · 70 tests |
-| 2 | Customer resolution | 🔧 Built in [`step2/`](step2/STEP2.md) (50/50 practice labels), being wired into `system/` |
-| 3 | Hit profile | ✅ On `main` · 23 tests |
-| 4 | Decision engine | ⏳ Stub: every hit goes to `REVIEW` for now |
-| 5 | Evaluation and QA | 🔧 A separate cautious evaluator lives in [`risk-aversion-and-intelligibility/`](risk-aversion-and-intelligibility/README.md) |
+| 0 | Foundation: entry point, data loader, output checks | ✅ `system/run`, `engine/s1_load.py`, `engine/s5_batch.py` |
+| 1 | Shared matchers: names, dates, countries | ✅ `system/match/` · transliteration is used by the engine |
+| 2 | Customer resolution | ✅ `engine/s2_customers.py` (Nij's Step 2 in `steps/customer.py` feeds Vera) |
+| 3 | Hit profile | ✅ `engine/s3_hit_facts.py`, with the Step 3 age reader (`steps/hit.py`) as fallback |
+| 4 | Decision engine | ✅ `engine/s4_decide.py` |
+| 5 | Evaluation and QA | 🔧 `tools/score` (practice labels, unsafe clearances first) · `tools/check_customers.py` |
 | 6 | Documentation and submission | 🔧 In progress |
-| 7 | Analyst extras | ✅ The Vera app |
+| 7 | Analyst extras | 🔧 Vera works but still runs on the Step 0–3 pipeline (`steps/`), not the engine |
 
-Until Step 4 lands, the pipeline runs end to end (819 dev hits in about 4 seconds) but sends everything to review. That scores zero, and it is never unsafe.
+Dev set: 457 cleared, 121 matched, 241 review out of 819 hits in about 75 seconds; practice labels 50/50 with 0 unsafe clearances; byte-identical reruns.
 
 ## Methodology
 
-How the matchers treat names, dates and countries, and why:
-
-- [**Step 1 methodology**](STEP1_METHODOLOGY.md): the 13 main decisions in plain language.
-- [**Decision log**](DECISIONS.md): every decision with its reason and status, plus notes for later steps.
+- [**Step 1 methodology**](docs/plan/STEP1_METHODOLOGY.md): the main name, date and country decisions in plain language.
+- [**Step 2 notes**](docs/plan/STEP2.md): customer resolution.
+- [**Decision log**](docs/plan/DECISIONS.md): every decision with its reason and status.
+- [**Cautious-clearance spec**](docs/spec/README.md): intent, requirements, design and the false-clearance acceptance cases the engine is tested against.
 
 A few highlights:
 
-- **Names in any script.** Cyrillic, Greek, Armenian, Georgian and Japanese names are transliterated with fixed tables. Names in other scripts are kept and flagged for analysts, never treated as a mismatch.
-- **Generous name matching, in the safe direction.** Nicknames, typos, reordered and joined names all count as a match, because a match can only block a clearance.
-- **Ambiguous dates keep every reading.** `03/04/1988` counts as a mismatch only if both 3 April and 4 March mismatch.
-- **Ambiguous countries count as all of them.** `Congo` means both Congos; an extra country can only block a clearance.
+- **Names in any script.** Cyrillic, Greek, Armenian, Georgian and Japanese names are transliterated with fixed tables before matching.
+- **Every clearance is a named contradiction**, replayed from its source records before it is written.
+- **Bank slash dates are day-first for linking records only;** a date that could be read two ways never clears a hit on its own.
+- **Ambiguous countries count as all of them.** An extra country can only block a clearance.
 
 ## Repository map
 
+Folders follow the pipeline. Read `system/engine/` top to bottom: `s1` → `s5` is the order a hit goes through.
+
 ```
-system/                  the graded system
-├── run                  entry point: system/run <data folder> <output file>
-├── main.py              pipeline: load → resolve → profile → decide → write
-├── data.py · model.py   data loader and the shared data model (Fact, pictures, Decision)
-├── customer.py          step 2: who is the customer?
-├── hit.py               step 3: who is the listed person?
-├── decide.py            step 4: compare and decide
-├── match/               step 1: names, transliteration, dates, countries
-└── vera/                the analyst app
-tests/                   unit tests (invented data only)
-step2/                   customer resolution, before it is wired into system/
-risk-aversion-and-intelligibility/   a standalone cautious evaluator and its spec
-assets/brand/            Vera logo files
+system/
+├── run · run.py          graded entry point: system/run <data folder> <output file>
+├── engine/               THE GRADED PIPELINE
+│   ├── s1_load.py        1. read the tables, check every alert's hit list
+│   ├── s2_customers.py   2. who is the customer? links, merges, approved KYC, notes
+│   ├── s3_hit_facts.py   3. what the listing says: birth dates, countries, reports, death
+│   ├── s4_decide.py      4. policy rules → decision, reason code, reason, evidence
+│   ├── s5_batch.py       5. every hit in order, verify the rows, write the file
+│   └── normalize.py      shared name/date/country helpers (+ countries.tsv)
+├── match/                Step 1 matchers: names, transliteration, dates, countries
+├── steps/                Step 0–3 contract and modules (data, model, customer, hit, decide, main); Vera runs on these
+├── vera/ · vera_cli.py   the analyst app
+tools/                    score (practice labels) · review (what-if demo) · check_customers.py
+tests/                    test_engine/ · test_match/ · test_steps/ (invented data only)
+docs/
+├── brief/                Track 2 description and the organiser's brief
+├── plan/                 steps.txt · DECISIONS.md · STEP1_METHODOLOGY.md · STEP2.md
+└── spec/                 cautious-clearance spec: intent, requirements, design, failure modes
+assets/brand/             Vera logo files
+datasets/                 dev data (must be purged before submission)
 ```
 
 ## Data and safety
