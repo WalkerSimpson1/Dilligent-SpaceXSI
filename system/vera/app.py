@@ -26,10 +26,9 @@ from datetime import datetime
 from typing import Optional
 
 from steps.data import Data, as_list, load, search_query
-from steps.main import decide_all, write_output
 from steps.model import DIFFERENT, REVIEW, SAME, Decision
 
-from . import emails, guide, splash, term, widgets
+from . import emails, engine_bridge, guide, splash, term, widgets
 from .term import Quit, c
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,7 +52,6 @@ class Session:
         self.overrides: dict[str, dict] = {}
         self.last_run: Optional[str] = None
         self.run_seconds = 0.0
-        self.errors = 0
         self._status = "starting"
 
     # --- loading and running ---------------------------------------------------------
@@ -72,13 +70,14 @@ class Session:
             progress["i"], progress["n"] = i + 1, n
 
         t0 = time.time()
-        decisions, self.errors = splash.run_with_spinner(
-            lambda: decide_all(self.data, on_hit),
+        # The graded engine decides; Vera's own loader (self.data) is only for display.
+        decisions, rows, engine_data = splash.run_with_spinner(
+            lambda: engine_bridge.decide_all(self.folder, on_hit),
             lambda: "Deciding hits  " + splash.progress_bar(progress["i"], progress["n"]))
         self.run_seconds = time.time() - t0
         self.decisions = {d.hit_id: d for d in decisions}
         os.makedirs(WORK, exist_ok=True)
-        write_output(decisions, os.path.join(WORK, "last_run.jsonl"))
+        engine_bridge.write_last_run(rows, engine_data, os.path.join(WORK, "last_run.jsonl"))
         self.last_run = datetime.now().strftime("%H:%M")
 
     def ensure_run(self) -> None:
@@ -178,7 +177,6 @@ def summary_screen(s: Session) -> None:
     lines += ["", widgets.kv([
         ("Hits decided", f"{len(ds)}"),
         ("Alerts closed", f"{closed} of {len(alerts)}  {c('(every hit cleared)', 'grey')}"),
-        ("Errors", c(str(s.errors), "red" if s.errors else "green")),
         ("Output", os.path.relpath(os.path.join(WORK, 'last_run.jsonl'), ROOT)),
     ])]
     lines += ["", practice_score(s)]

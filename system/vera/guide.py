@@ -159,7 +159,6 @@ def render_path(d: Decision) -> str:
     lines.append(f"  ╰─▶ {widgets.badge(d.decision)} {c(d.reason_code, 'bold')}")
     if not d.checks:
         lines.append("")
-        lines.append(widgets.wrap(c("The decision engine (step 4) hasn't been built yet, so no checks "
-                                    "are recorded. Once it fills Decision.checks, this tree shows "
-                                    "exactly which check decided the hit.", "grey")))
+        lines.append(widgets.wrap(c("No checks were recorded for this hit, so the tree cannot show "
+                                    "which check decided it.", "grey")))
     return "\n".join(lines) + "\n"

@@ -38,7 +38,7 @@ MISSING = {
     "AMBIGUOUS_HOLDER": ("More than one customer fits this alert (for example joint account holders). Confirm which person was screened.", None),
     "NO_CUSTOMER_RECORD": ("No customer record could be found for this alert. Locate the customer before deciding.", None),
     "NO_HIT_DOB": ("The listed profile gives no date of birth, in its fields, notes or matching search results. Research the listed person's date of birth.", None),
-    "NOT_IMPLEMENTED": ("Vera's decision engine is not complete yet, so this hit needs a full manual review.", None),
+    "UNRESOLVED": ("The records on file neither establish a match nor rule it out. Review the listing and the customer's records side by side.", None),
 }
 
 FORBIDDEN = re.compile(
@@ -66,10 +66,10 @@ class Draft:
 
 
 def infer_missing(d: Decision, alert: dict, hit: dict, record_id: Optional[str]) -> list[str]:
-    """Use the engine's missing list; while the engine is a stub, make a best guess from
-    the raw records so the drafts are still specific. Guesses only shape the wording of
+    """Use the engine's missing list (mapped from its REVIEW blockers in engine_bridge.py);
+    when it maps to no code, make a best guess from the raw records so the drafts stay specific. Guesses only shape the wording of
     a draft; they never change a decision."""
-    codes = [m for m in d.missing if m in MISSING and m != "NOT_IMPLEMENTED"]
+    codes = [m for m in d.missing if m in MISSING]
     if codes:
         return codes
     guess = []
@@ -81,7 +81,7 @@ def infer_missing(d: Decision, alert: dict, hit: dict, record_id: Optional[str])
         guess.append("NO_CUSTOMER_DOB")
     if not as_list(hit.get("dobs")) and hit.get("entity_type") != "Company":
         guess.append("NO_HIT_DOB")
-    return guess or ["NOT_IMPLEMENTED"]
+    return guess or ["UNRESOLVED"]
 
 
 def _customer_contact(data: Data, alert: dict, record_id: Optional[str]) -> tuple[Optional[str], str]:

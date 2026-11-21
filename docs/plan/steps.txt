@@ -4,8 +4,8 @@
 > evaluator (`system/engine/s1_load.py` → `s5_batch.py`, run in that order) with three pieces from Steps 1-3 built in: transliteration
 > (1a), day-first bank slash dates for record linking (1b/2.3), and Step 3's age reader as a hit-DOB
 > fallback (3.2/3.4). Steps 0, 2 (customer resolution), 4 (decision engine) and 5.1 (scorer: `tools/score`)
-> are covered by Sam's code; `system/steps/` (main, decide, customer, …) stays for Vera only. Still open: names
-> N7/N8 (R6), wiring Vera (Step 7) to the new engine, Step 5.2-5.5 tooling, Step 6 docs and data purge.
+> are covered by Sam's code. Vera (Step 7) runs on the engine via `system/vera/engine_bridge.py` (R9); names stay
+> strict (R6); crash safety is Sam's (R10). Still open: Step 5.2-5.5 tooling, Step 6 docs; data purge later (R11).
 > Rule for changes from here: a swap stays only if `tools/score` keeps 0 unsafe clearances and every
 > newly changed clearance has been read. File paths in the steps below are the original plan; the
 > current layout is the repository map in README.md (DECISIONS.md R8).

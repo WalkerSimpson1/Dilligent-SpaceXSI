@@ -159,7 +159,7 @@ The work plan with every step is in [`docs/plan/steps.txt`](docs/plan/steps.txt)
 | 4 | Decision engine | ✅ `engine/s4_decide.py` |
 | 5 | Evaluation and QA | 🔧 `tools/score` (practice labels, unsafe clearances first) · `tools/check_customers.py` |
 | 6 | Documentation and submission | 🔧 In progress |
-| 7 | Analyst extras | 🔧 Vera works but still runs on the Step 0–3 pipeline (`steps/`), not the engine |
+| 7 | Analyst extras | ✅ Vera, on the graded engine (`vera/engine_bridge.py`): same decisions as `system/run`, plus decision trees and email drafts |
 
 Dev set: 457 cleared, 121 matched, 241 review out of 819 hits in about 75 seconds; practice labels 50/50 with 0 unsafe clearances; byte-identical reruns.
 
@@ -192,8 +192,8 @@ system/
 │   ├── s5_batch.py       5. every hit in order, verify the rows, write the file
 │   └── normalize.py      shared name/date/country helpers (+ countries.tsv)
 ├── match/                Step 1 matchers: names, transliteration, dates, countries
-├── steps/                Step 0–3 contract and modules (data, model, customer, hit, decide, main); Vera runs on these
-├── vera/ · vera_cli.py   the analyst app
+├── steps/                Step 0–3 modules: data + model (Vera's loader and Decision type), customer (Step 2 check), hit (age reader used by s3)
+├── vera/ · vera_cli.py   the analyst app; engine_bridge.py runs the graded engine for it
 tools/                    score (practice labels) · review (what-if demo) · check_customers.py
 tests/                    test_engine/ · test_match/ · test_steps/ (invented data only)
 docs/
