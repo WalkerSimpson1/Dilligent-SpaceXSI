@@ -65,3 +65,15 @@ Among the 50 correct decisions, all 50 used an accepted reason code and customer
 The local CSV workbook can truncate long text. Its field types and layout are adaptations of the organizer’s original case tables. Synthetic tests exercise both adapters, but a conformance check with the original development and unseen deliveries requires access to those files. The official validator was absent from this checkout. The practice scorer reports decision costs and reference reason, customer ID, and evidence coverage. It cannot assess prose or substitute for official scoring.
 
 Free-text extraction favors attributable facts and recognizable date and verification wording. An unparsed populated value can keep a rule unresolved. Ambiguous slash dates retain both valid interpretations unless the input establishes one, so some plausible phone-and-date links remain separate. The original delivery should be used to confirm date conventions and the exact JSONL name-variant schema.
+
+## Optional Grok backup
+
+The batch runner and Vera use the offline evaluator by default. To try Grok, set `OPENROUTER_API_KEY` in your shell and enable the backup for the run. `SCREENING_GROK_MODEL` can override the default `x-ai/grok-4.20`.
+
+```sh
+SCREENING_GROK_FALLBACK=1 system/run datasets output/dev.jsonl
+```
+
+The backup runs on an individual hit still in `REVIEW` with a usable customer birth date and no parsed or structured listing birth date. It sends the listing names and first paragraph of `profile_notes` to OpenRouter. It asks for whole, verbatim quotes. Python confirms each quote appears in the paragraph, checks its subject and date wording, keeps both possible birth years for a dated age, and sends accepted evidence through the same policy rules. Promising wording that fails these checks stays in review. Unreadable birth information in a profile blocks the fallback to supplied search snippets.
+
+The backup is limited to 60 requests per run, a 4,000-character paragraph, and a 12-second request timeout. The runner reports request, accepted-evidence, and error counts on stderr. An unavailable API or an unusable reply keeps the original review. An in-memory cache reuses replies for identical profiles within a run. The live service can vary between runs. Use offline mode when byte-for-byte repeatability is required. Verify the backup on labeled cases before enabling it in the graded run. [OpenRouter chat API](https://openrouter.ai/docs/api-reference/chat-completion) · [Grok model endpoints](https://openrouter.ai/api/v1/models/x-ai/grok-4.20/endpoints)

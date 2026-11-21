@@ -62,7 +62,7 @@ BIRTH = re.compile(rf'\b(?:date of birth|d\.?o\.?b\.?|born|birth\s+date)\s*'
                    rf'\s*[:=]?\s*(?:either\s+)?({DATE_TEXT})(?![\w/-])', re.I)
 BIRTH_ALTERNATIVE = re.compile(rf'\s*[,;]?\s*(?:\b(?:or|and/or|alternatively|versus)\s+|(?<=[,;])\s*)'
                                rf'({DATE_TEXT})(?![\w/-])', re.I)
-BIRTH_MARKER = re.compile(r'\b(?:date of birth|birth date|dob|born)\b', re.I)
+BIRTH_MARKER = re.compile(r'\b(?:date of birth|year of birth|birth date|birth year|birthdate|dob|born)\b', re.I)
 AGE = re.compile(r'\b(?:aged?(?:\s+of)?\s*[:\-]?\s*(\d{1,3})|(\d{1,3})[- ]years?[- ]old|'
                  r'(?:he|she)\s+was\s+(\d{1,3})(?![\d/-]))\b', re.I)
 APPOSITIVE_AGE = re.compile(r',\s*(\d{1,3})\s*,|\((\d{1,3})\)')
@@ -108,7 +108,7 @@ def text_birth(text, names, *, search=False):
         if THIRD_PARTY.search(segment):
             prior_subject = False
             continue
-        record_field = bool(re.match(r'\s*(?:dob|date of birth|birth date)\s*[:=]', segment, re.I))
+        record_field = bool(re.match(r'\s*(?:dob|date of birth|year of birth|birth date|birth year)\s*[:=]', segment, re.I))
         pronoun_opening = bool(re.match(r'\s*(?:he|she|they|the subject|the individual)\s+(?:was|were|is)\b', segment, re.I))
         directly_referred = prior_subject and pronoun_opening
         prior_subject = bool(mentions) or directly_referred
@@ -294,28 +294,29 @@ def _about_subject(text, names):
             and not _names_someone_else(text, names))
 
 
-def step3_dobs(row, hit_id, hit_countries, search_index, names):
-    """Fallback birth years from Step 3 age reader (system/steps/hit.py) when the readers above
-    find none and the structured dobs field is empty. Same policy order: the first paragraph
-    of the profile notes, then supplied search results that carry the category's listing
-    phrase and a country tied to the hit. Only ages tied to a date count ("at which point he
-    was 27"), never explicit "born ..." dates, which text_birth already reads with attribution
-    checks; every sentence or snippet must pass _about_subject. Returns {PartialDate: source}.
-    docs/plan/DECISIONS.md R4."""
+def first_profile_paragraph(notes):
+    return re.split(r'\n\s*\n', notes, maxsplit=1)[0]
+
+
+def step3_profile_dobs(paragraph, names):
+    """Recover dated ages from the first paragraph when the stricter parser misses them."""
+    import steps.hit as step3
+
+    if BIRTH_MARKER.search(paragraph):
+        return ()
+    return tuple(sorted({PartialDate(year) for sentence in step3._sentences(paragraph)
+                         if _about_subject(sentence, names)
+                         for year, _, _ in step3.birth_years_from_sentence(sentence)}))
+
+
+def step3_search_dobs(row, hit_countries, search_index, names):
+    """Recover dated ages from eligible supplied snippets after the profile has been checked."""
     import steps.hit as step3
     from match import countries as step3_countries
 
+    if not hit_countries:
+        return {}
     found = {}
-
-    def add(year, source):
-        found.setdefault(PartialDate(year), source)
-
-    for sentence in step3._sentences(step3.first_paragraph(value(row, 'profile_notes'))):
-        if _about_subject(sentence, names):
-            for year, _, _ in step3.birth_years_from_sentence(sentence):
-                add(year, hit_id)
-    if found or not hit_countries:
-        return found
     name = value(row, 'name')
     phrase = step3.listing_phrase(step3.category(row))
     exclude = [name, query_key(name), *(a for a in list_values(row, 'aliases') if isinstance(a, str))]
@@ -327,7 +328,7 @@ def step3_dobs(row, hit_id, hit_countries, search_index, names):
         if not step3_countries.find_in_text(text, exclude_names=exclude) & hit_countries:
             continue
         for year, _, _ in step3.birth_years_from_sentence(snippet):
-            add(year, source_id(result, 'result_id'))
+            found.setdefault(PartialDate(year), source_id(result, 'result_id'))
     return found
 
 
@@ -347,8 +348,12 @@ def build_hit(row, search_index, *, workbook=False, text_extraction=True):
     notes = value(row, 'profile_notes')
     clipped = workbook and len(notes) >= 32000
     if text_extraction and kind == 'person' and not (dob.values or dob.uncertain):
-        first = re.split(r'\n\s*\n', notes, maxsplit=1)[0]
+        first = first_profile_paragraph(notes)
         parsed, uncertain = text_birth(first, normalized_names)
+        if not parsed and not clipped:
+            recovered = step3_profile_dobs(first, normalized_names)
+            if recovered:
+                parsed, uncertain = recovered, False
         dob = DateEvidence(tuple(sorted(parsed)), (hit_id,) if parsed or uncertain else (), uncertain or clipped)
         if not (dob.values or dob.uncertain):
             categories = list_values(row, 'categories')
@@ -369,14 +374,12 @@ def build_hit(row, search_index, *, workbook=False, text_extraction=True):
                     uncertain |= unresolved
                 elif issue:
                     rejected.add(issue)
-            dob = DateEvidence(tuple(sorted(parsed)), tuple(sorted(deciding)), uncertain)
+            if not (parsed or uncertain):
+                found = step3_search_dobs(row, set(geography.sources), search_index, normalized_names)
+                parsed, deciding = found.keys(), found.values()
+            dob = DateEvidence(tuple(sorted(parsed)), tuple(sorted(set(deciding))), uncertain)
             if rejected and not dob.values:
                 problems.extend(sorted(rejected, key=lambda issue: ('lacks a country' not in issue, issue)))
-    if text_extraction and kind == 'person' and not dob.values and not list_values(row, 'dobs'):
-        found = step3_dobs(row, hit_id, set(geography.sources), search_index, normalized_names)
-        if found:
-            dob = DateEvidence(tuple(sorted(found)), tuple(sorted(set(found.values()))), False)
-            problems = [p for p in problems if 'search result' not in p]
     if dob.uncertain:
         problems.append('The listing has birth information that cannot be read confidently')
     report_candidates = []

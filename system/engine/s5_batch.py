@@ -1,5 +1,6 @@
 import argparse
 from collections import Counter, defaultdict
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -8,16 +9,17 @@ from tempfile import NamedTemporaryFile
 from time import monotonic
 
 from engine.s2_customers import Customers
-from engine.s3_hit_facts import build_hit, date_evidence, query_key
+from engine.s3_hit_facts import DateEvidence, build_hit, date_evidence, first_profile_paragraph, query_key
 from engine.s1_load import Dataset, InputError, index, list_values, value
 from engine.s4_decide import CLEAR, CODES, REVIEW, Decision, Finding, decide
+from engine.grok import configured_grok
 
 
 OUTPUT_FIELDS = {'alert_id', 'hit_id', 'decision', 'reason_code', 'customer_record_id', 'reason', 'evidence'}
 
 
 class Batch:
-    def __init__(self, data, *, text_extraction=True):
+    def __init__(self, data, *, text_extraction=True, grok=None):
         self.data = data
         self.text_extraction = text_extraction
         self.customers = Customers(data, text_extraction=text_extraction)
@@ -26,6 +28,7 @@ class Batch:
         self.resolved_customers = {}
         self.screening_dates = {}
         self.fallbacks = set()
+        self.grok = (grok if grok is not None else configured_grok()) if text_extraction else None
 
     def evidence(self, hit_id):
         alert_id = self.hit_to_alert[hit_id]
@@ -43,7 +46,20 @@ class Batch:
         self.fallbacks.discard(hit_id)
         try:
             _, customers, hit, screened = self.evidence(hit_id)
-            return decide(customers, hit, screened, self.data.names, alert_id=alert_id)
+            baseline = decide(customers, hit, screened, self.data.names, alert_id=alert_id)
+            if (self.grok is None or baseline.finding.decision != REVIEW or hit.kind != 'person'
+                    or hit.dob.values or not any(customer.dob.values and not customer.dob.uncertain
+                                                 for customer in customers if customer.kind == 'person')):
+                return baseline
+            row = self.data.hits[hit_id]
+            notes = value(row, 'profile_notes')
+            if list_values(row, 'dobs') or (self.data.mode == 'csv' and len(notes) >= 32000):
+                return baseline
+            recovered = self.grok.birth_dates(first_profile_paragraph(notes), hit.names)
+            if not recovered:
+                return baseline
+            enriched = replace(hit, dob=DateEvidence(recovered, (hit.id,)), problems=())
+            return decide(customers, enriched, screened, self.data.names, alert_id=alert_id)
         except Exception as exc:
             self.fallbacks.add(hit_id)
             print(f'Hit {hit_id!r} evaluation failed ({type(exc).__name__})', file=sys.stderr)
@@ -140,8 +156,11 @@ def main(argv=None):
     except (OSError, ValueError) as exc:
         print(f'Screening run failed ({type(exc).__name__}). {exc}', file=sys.stderr)
         return 1
+    grok = batch.grok
+    model_counts = (f'grok_requests={grok.requests} grok_accepted={grok.accepted} grok_errors={grok.errors} | '
+                    if grok else '')
     print(f'{data.mode.upper()} | {len(rows)} hits | {len(data.alerts)} alerts | '
           f'{cleared_alerts} cleared alerts | {dict(sorted(decisions.items()))} | '
-          f'fallbacks={len(batch.fallbacks)} | {monotonic()-start:.2f}s',
+          f'fallbacks={len(batch.fallbacks)} | {model_counts}{monotonic()-start:.2f}s',
           file=sys.stderr)
     return 0
