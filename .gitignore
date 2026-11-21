@@ -226,3 +226,5 @@ __marimo__/
 dev/
 output/cache/
 emails/
+.vera/
+*.db

@@ -30,10 +30,29 @@ def safe_review(hit: dict, err: Exception) -> Decision:
 def run(folder: str, out_path: str) -> None:
     t0 = time.time()
     data = load(folder)
+    decisions, errors = decide_all(data)
+    write_output(decisions, out_path)
+    counts = Counter(d.decision for d in decisions)
+    print(f"{len(decisions)} hits -> {out_path} in {time.time() - t0:.1f}s; "
+          f"{dict(sorted(counts.items()))}; errors={errors}", file=sys.stderr)
+
+
+def write_output(decisions: list[Decision], out_path: str) -> None:
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+        for d in decisions:
+            f.write(json.dumps(d.to_output(), ensure_ascii=False) + "\n")
+
+
+def decide_all(data, on_hit=None) -> tuple[list[Decision], int]:
+    """Decide every hit, in file order. on_hit(i, total) reports progress (Vera UI)."""
     resolved: dict[str, list] = {}  # alert_id -> candidates (resolve each alert once)
     decisions: list[Decision] = []
     errors = 0
-    for h in data.hits:
+    total = len(data.hits)
+    for i, h in enumerate(data.hits):
+        if on_hit:
+            on_hit(i, total)
         try:
             alert = data.alerts_by_id.get(h["alert_id"], {})
             if h["alert_id"] not in resolved:
@@ -46,15 +65,7 @@ def run(folder: str, out_path: str) -> None:
                 traceback.print_exc()
             d = safe_review(h, e)
         decisions.append(d)
-
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
-        for d in decisions:
-            f.write(json.dumps(d.to_output(), ensure_ascii=False) + "\n")
-
-    counts = Counter(d.decision for d in decisions)
-    print(f"{len(decisions)} hits -> {out_path} in {time.time() - t0:.1f}s; "
-          f"{dict(sorted(counts.items()))}; errors={errors}", file=sys.stderr)
+    return decisions, errors
 
 
 if __name__ == "__main__":

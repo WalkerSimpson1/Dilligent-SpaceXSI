@@ -144,9 +144,12 @@ class Data:
         return self.tables["alerts"]
 
 
-def load(folder: str) -> Data:
+def load(folder: str, on_table=None) -> Data:
+    """on_table(name) is called before each table loads (used by Vera's loading screen)."""
     tables: dict[str, list[dict]] = {}
     for name, (jsonl, tab, _key) in TABLES.items():
+        if on_table:
+            on_table(name)
         jpath = os.path.join(folder, jsonl)
         if os.path.exists(jpath):
             tables[name] = _read_jsonl(jpath)

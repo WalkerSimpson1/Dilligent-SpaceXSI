@@ -29,6 +29,18 @@ REASON_CODES: dict[str, tuple[str, ...]] = {
 
 AMBIGUOUS = "AMBIGUOUS"  # value of customer_record_id when more than one person fits
 
+# The order the decision engine walks the policy (principles 6 and 7).
+CHECK_ORDER = (
+    "Entity type",          # person vs company        -> ENTITY_TYPE_MISMATCH
+    "Customer record",      # who is the customer?     -> AMBIGUOUS_CUSTOMER_RECORD
+    "Deceased",             # death before screening   -> DECEASED
+    "Too young",            # under 16 at first report -> TEMPORAL_IMPOSSIBILITY
+    "Date of birth",        # every hit DOB contradicted -> DOB_MISMATCH
+    "Verified name",        # legal name agrees with none -> NAME_MISMATCH_VERIFIED
+    "Location",             # every country differs    -> LOCATION_MISMATCH
+    "Confirmation",         # name + DOB (+ country)   -> SAME_ENTITY codes
+)
+
 PERSON = "Individual"
 COMPANY = "Company"
 
@@ -120,6 +132,10 @@ class Decision:
     evidence: list[str]
     # Internal only (step 4.8 / step 7): what would settle a REVIEW. Not written.
     missing: list[str] = field(default_factory=list)
+    # Internal only: the path through the policy checks, for Vera's decision-tree view.
+    # Each entry: (check name from CHECK_ORDER, status, detail) where status is
+    # "pass" (no conflict), "fired" (decided the hit), "unknown" (missing data) or "skip".
+    checks: list[tuple[str, str, str]] = field(default_factory=list)
 
     def check(self) -> None:
         if self.decision not in REASON_CODES:
