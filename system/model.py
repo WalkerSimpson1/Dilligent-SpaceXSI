@@ -95,7 +95,7 @@ class Verified:
     source: str
     name: Optional[str]
     dob: Optional[PartialDate]
-    doc_country: Optional[str]          # ISO2
+    doc_countries: tuple[str, ...]      # ISO2 codes of the document country (usually one)
     when: Optional[str]                 # ISO date used to pick "most recent"
     doc_number: Optional[str] = None
     dob_raw: Optional[str] = None

@@ -4,7 +4,8 @@
     link, pics, note = resolve_with_index(alert_row, ix)   # one CustomerPicture per distinct person
 
 Written by the Step 2 owner (originally in step2/), wired into system/ unchanged in
-logic. Stdlib only. Name/date/country helpers come from `customer_compat`.
+logic. Stdlib only. Name/date/country helpers come from `customer_compat`, a thin
+bridge to the Step 1 matchers in system/match/.
 
 Pipeline contract (main.py, Vera):
     resolve(alert, data) -> list[CustomerPicture]   one picture per distinct person
@@ -95,8 +96,8 @@ def parse_kyc_note(text):
         dob = (cands or [dates[0][2]])[0]
 
     rest = masked.replace(name or "", " ")
-    cs = C.countries_in_text(rest)
-    return {"name": name, "dob": dob, "doc_country": cs[0] if cs else None}
+    cs = C.countries_in_text(rest, exclude_names=[name] if name else ())
+    return {"name": name, "dob": dob, "doc_countries": tuple(sorted(cs))}
 
 
 # ----------------------------------------------------------------------------
@@ -151,8 +152,7 @@ def build_index(tables):
         ix.dob[rid] = C.parse_partial(r.get("dob"))
         ix.parts[rid] = [p for p in (C.name_parts(r.get(k), comp)
                                      for k in ("full_name", "preferred_name", "login_name")) if p]
-        ix.cc[rid] = {c for c in (C.canon_country(r.get("residence_country")),
-                                  C.canon_country(r.get("nationality"))) if c}
+        ix.cc[rid] = C.canon_country(r.get("residence_country")) | C.canon_country(r.get("nationality"))
 
     # blocking indexes for the no-link search
     ix.by_year, ix.by_country = defaultdict(list), defaultdict(list)
@@ -208,13 +208,13 @@ def fits(alert, rid, ix):
     if not C.partial_equal(C.parse_partial(alert.get("dob")), ix.dob[rid]):
         return False
     country = C.canon_country(alert.get("country"))
-    if country and country not in ix.cc[rid]:
+    if country and not (country & ix.cc[rid]):
         return False
     city = _s(alert.get("city"))
     if city and not C.canon_country(city):       # a 'city' that is really a country is not a city test
         if not C.city_in(city, r.get("city"), r.get("address")):
             return False
-    elif city and C.canon_country(city) and not country and C.canon_country(city) not in ix.cc[rid]:
+    elif city and C.canon_country(city) and not country and not (C.canon_country(city) & ix.cc[rid]):
         return False
     return True
 
@@ -225,7 +225,7 @@ def _candidates_by_search(alert, ix):
     if d:
         pool = ix.by_year.get(d[0], [])
     elif country:
-        pool = ix.by_country.get(country, [])
+        pool = sorted({rid for c in country for rid in ix.by_country.get(c, [])})
     else:
         pool = list(ix.cust)
     return [rid for rid in pool if fits(alert, rid, ix)]
@@ -263,8 +263,7 @@ def build_picture(root, ix):
         if ix.dob[rid]:
             pic.dobs.append(Fact(kind="crm_dob", value=_pd(ix.dob[rid]), source=rid, raw=_s(r.get("dob"))))
         for kind, key in (("residence", "residence_country"), ("nationality", "nationality")):
-            c = C.canon_country(r.get(key))
-            if c:
+            for c in sorted(C.canon_country(r.get(key))):
                 pic.countries.append(Fact(kind=kind, value=c, source=rid, raw=_s(r.get(key))))
         for kind, key in (("city", "city"), ("address", "address")):
             if _s(r.get(key)):
@@ -275,7 +274,8 @@ def build_picture(root, ix):
                     cands.append((C.parse_partial(ck.get("checked_at")) or (0, 0, 0), 0, Verified(
                         source=ck["check_id"], name=_s(ck.get("verified_name")),
                         dob=_pd(C.parse_partial(ck.get("verified_dob"))),
-                        doc_country=C.canon_country(ck.get("document_country")), when=_s(ck.get("checked_at")),
+                        doc_countries=tuple(sorted(C.canon_country(ck.get("document_country")))),
+                        when=_s(ck.get("checked_at")),
                         doc_number=_s(ck.get("document_number")), dob_raw=_s(ck.get("verified_dob")))))
         for n in ix.notes_by_email.get((r.get("email") or "").lower(), []):
             ch = (n.get("channel") or "").lower()
@@ -284,9 +284,9 @@ def build_picture(root, ix):
                 if p["name"] or p["dob"]:
                     cands.append((C.parse_partial(n.get("created_at")) or (0, 0, 0), 1, Verified(
                         source=n["note_id"], name=p["name"], dob=_pd(p["dob"]),
-                        doc_country=p["doc_country"], when=_s(n.get("created_at")))))
+                        doc_countries=p["doc_countries"], when=_s(n.get("created_at")))))
             else:
-                for c in C.countries_in_text(n.get("text") or ""):
+                for c in sorted(C.countries_in_text(n.get("text") or "")):
                     pic.countries.append(Fact(kind="lived", value=c, source=n["note_id"], when=_s(n.get("created_at")), origin="note"))
                     evidence.add(n["note_id"])
     if cands:
@@ -296,8 +296,8 @@ def build_picture(root, ix):
         evidence.add(v.source)
         if v.dob:
             pic.dobs.append(Fact(kind="verified_dob", value=v.dob, source=v.source, when=v.when, raw=v.dob_raw))
-        if v.doc_country:
-            pic.countries.append(Fact(kind="document", value=v.doc_country, source=v.source, when=v.when))
+        for c in v.doc_countries:
+            pic.countries.append(Fact(kind="document", value=c, source=v.source, when=v.when))
         if v.name:
             pic.legal_name = Fact(kind="verified_name", value=v.name, source=v.source, when=v.when)
             pic.names.append(pic.legal_name)
@@ -341,6 +341,7 @@ def resolve(alert, data):
 
 
 def tables_from(data):
+    C.use_variants(data.variants)
     t = data.tables
     return {"alerts": t["alerts"], "customers": t["customers"], "accounts": t["accounts"],
             "onboarding": t["onboarding"], "kyc": t["kyc_checks"], "notes": t["notes"]}

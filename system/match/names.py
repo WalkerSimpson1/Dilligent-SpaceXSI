@@ -12,6 +12,7 @@ shares a group with it. Two parts are variants only if they share a group
 """
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -192,8 +193,17 @@ IDENTICAL, VARIANT, TYPO, VARIANT_TYPO = "identical", "variant", "typo", "varian
 MAX_JOIN = 3   # up to 3 neighbouring parts may be written as one (team decision)
 
 
+@functools.lru_cache(maxsize=1 << 20)
 def _typo(a: str, b: str) -> bool:
-    return edit_distance(a, b) <= max_edits(a, b)
+    # Same answer as edit_distance(a, b) <= max_edits(a, b), but cheap exits first:
+    # the length gap alone is a lower bound on the edits. Cached because customer
+    # search (Step 2) compares the same common parts many thousands of times.
+    k = max_edits(a, b)
+    if k == 0:
+        return a == b
+    if abs(len(a) - len(b)) > k:
+        return False
+    return edit_distance(a, b) <= k
 
 
 def part_match(a: str, b: str, variants: Variants) -> str | None:
