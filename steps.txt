@@ -1,0 +1,129 @@
+# Work plan: Same Person or Not? (Track 2)
+
+The pipeline has one decision per hit, and each stage feeds the next:
+
+```
+alerts ─┐
+        ├─► [2] Customer resolution ──► CustomerPicture ─┐
+CRM/acc/KYC/notes                                         ├─► [4] Decision engine ─► output/dev.jsonl
+hits ───┼─► [3] Hit profile ─────────► HitPicture ───────┘        (decision, reason_code,
+search ─┘                                                         customer_record_id, reason, evidence)
+        [1] Shared matchers: names · dates · countries   (used by 2, 3 and 4)
+        [5] Evaluation & QA          [6] README & submission
+```
+
+**Order of work:** Step 0 first (one person, small). Steps 1, 2, 3 and 5 can then run in parallel. Step 4 starts against stub inputs and is wired up once 2 and 3 land. Step 6 runs throughout.
+
+### What the data looks like (from `datasets/`)
+- 440 alerts, 819 hits. 395 alerts are on individuals and 45 on companies.
+- **How alerts link to a customer:** 170 carry an account, 70 a login, 54 an email, and **146 carry no link at all**, so the customer has to be found by searching the CRM.
+- **667 of the 819 hits have no `dobs` field.** Their dates of birth have to come from profile notes and web search results, which makes step 3 one of the biggest score drivers.
+- **CRM dates of birth come in mixed formats:** `1988-03-14`, `14/03/1988`, `14 March 1988`, `March 14, 1988` and others.
+- **KYC check results:** 49.6k approved, 2.5k rejected, 2.4k expired. Only approved checks count as evidence.
+- **The 50 practice labels:** 28 DIFFERENT_ENTITY (17 of them LOCATION_MISMATCH), 12 SAME_ENTITY and 10 REVIEW. Each label has a `path` column that walks through the answer, which makes it the test fixture for every step.
+
+---
+
+## Step 0: Foundation (one person, merge before anything else)
+Branch `feat/foundation`.
+
+- 0.1 `system/run` entry point (shell, calls `python3 system/main.py "$1" "$2"`). Standard library only.
+- 0.2 `system/data.py`: load every table into dicts keyed by ID. Read **`.jsonl`** files (the format the graders use) and fall back to the browse CSVs until we have the JSONL.
+- 0.3 `system/model.py`: the shared contract that every other step codes against:
+  - `CustomerPicture`: record_ids, names (legal/full/preferred/login), verified name, dobs, countries (with source), entity_type, evidence_ids
+  - `HitPicture`: names + aliases, possible birth dates, earliest dated report, death date, countries, entity_type, evidence_ids
+  - `Fact(value, source_id, kind)`, so every fact carries the ID of the record that supports it (principle 9)
+  - `Decision(hit_id, alert_id, decision, reason_code, customer_record_id, reason, evidence)`
+- 0.4 Add `.gitignore` entries for `dev/`, `.env` and `output/cache/`.
+- 0.5 Stub pipeline: return REVIEW / INSUFFICIENT_DATA for every hit, so `output/dev.jsonl` validates end to end from day one.
+
+## Step 1: Shared matchers (`system/match/`), can be split three ways
+Branch `feat/names`, `feat/dates`, `feat/countries`. These are pure functions, which makes them the easiest part to unit test.
+
+**1a. Names (principle 8)**
+- 1a.1 Normaliser: case, accents, punctuation, dropping anything in brackets, `Surname, Given` ordering.
+- 1a.2 Treat single letters as initials. Drop placeholders (NA, N/A, TEST, UNKNOWN, XXX, NONE, digits). Remove company legal forms for companies.
+- 1a.3 Part matcher: identical, a `name_variants.json` group, joined/split forms (Abdulsalam = Abdul Salam), and edit distance (≤1 for 4–6 letters, ≤2 for 7+, exact for <4; the shorter part's length decides).
+- 1a.4 Name agreement: at least 2 matching distinct parts, or every part of the shorter name matches. Return the matched parts for the reason text.
+- 1a.5 Flag a customer with fewer than 2 real name parts as `name_undecidable`.
+
+**1b. Dates**
+- 1b.1 Parse every format seen in the data (ISO, `dd/mm/yyyy`, `14 March 1988`, `March 14, 1988`, `yyyy-mm`, `yyyy`, `1996; 1997` lists) into a partial date `(y, m?, d?)`.
+- 1b.2 Turn an age at a date into two possible birth years ("aged 45 in March 2019" → 1973 or 1974).
+- 1b.3 `dob_agrees(customer, hit_dates)` and `dob_contradicts(...)`, exactly as in principles 6 and 7: more than 1 year apart, or the same year with a different month or day. One agreeing date stops a clearance.
+- 1b.4 `age_at(dob, date)` for the under-16 temporal check.
+
+**1c. Countries**
+- 1c.1 Map ISO2/ISO3 codes, English names and nationality adjectives ("Nigerian", "British") to one canonical code. Territories count as their own country.
+- 1c.2 Ignore "International" and "Europe". Take the last part of an address as its country.
+- 1c.3 Pull city and country mentions out of free text (used by 2.5 and 3.4).
+
+## Step 2: Customer resolution (`system/customer.py`)
+Branch `feat/customer`, which two people could share (2.1–2.3 / 2.4–2.6).
+
+- 2.1 **Follow links:** `account_ref` → accounts → customer, `login_handle` → accounts, `email` → customers. An account can have joint holders, so the screened details have to choose between them (principle 2).
+- 2.2 **Search when there's no link** (146 alerts): build an index of CRM name parts, then filter on name agreement (1a, including nicknames and typos), a date of birth matching in every part both give, the screened country as residence or nationality, and the screened city in the record's city or address.
+- 2.3 **One person, one picture (principle 3):** union-find on records that share a phone *and* the same full date of birth, or whose approved KYC checks share a document number. Apply it transitively. A shared phone or address alone doesn't merge records.
+- 2.4 **Verified identity (principle 4):** account → onboarding → KYC applicant → the most recent *approved* check. Also parse KYC-channel notes ("Sumsub completed identity verification for X, born …, national ID issued in Germany"). Ignore rejected and expired checks.
+- 2.5 **Notes:** collect past countries and cities ("used to live in …") from notes, filed by email, for every record in the person's cluster.
+- 2.6 Build the `CustomerPicture`. If more than one *distinct person* fits, return them all and let step 4 decide whether the alert is AMBIGUOUS.
+- **Test against:** the `path` column of every practice label. Check that you land on the same `customer_record_ids`.
+
+## Step 3: Hit profile (`system/hit.py`)
+Branch `feat/hit`, which two people could share (3.1–3.3 / 3.4–3.5).
+
+- 3.1 Read the structured fields: `dobs`, `deceased_date`, `life_status`, `nationality`, `citizenship`, `countries`, `addresses`, `place_of_birth`, `entity_type`, aliases.
+- 3.2 **Date of birth from profile notes**, using the *first paragraph* only: an explicit date of birth, or an age at a date (via 1b.2). Expect different wording in the unseen set, so keep the patterns general.
+- 3.3 **Dated reports:** only lines of the exact form `According to …; September 10, 2025: …` count. Take the earliest one for the temporal check. For companies, only `dobs` counts as an incorporation date.
+- 3.4 **Search results**, used only when 3.1 and 3.2 give no date of birth. Look them up by query (the name's lowercase words, sorted). Keep a result only if it contains the listing phrase for the hit's primary category ("a politically exposed person", and so on) **and** a country tied to the hit. Pull the age at a date out of the snippet.
+- 3.5 Build the `HitPicture`, with every fact carrying its source ID (hit ID, `SR-…`).
+
+## Step 4: Decision engine (`system/decide.py`)
+Branch `feat/decide`. Start it against hand-built pictures.
+
+- 4.1 **Contradiction checks (principle 6)**, each returning `(fired, reason_code, evidence_ids, facts)`: TYPE, DECEASED, TEMPORAL, DOB, LOCATION, NAME_VERIFIED.
+- 4.2 **Guard rails:** a country difference never clears a hit whose name and date of birth agree (it becomes REVIEW). Any agreeing date of birth blocks a DOB_MISMATCH. A customer flagged `name_undecidable` can't be cleared or confirmed on name.
+- 4.3 **Confirmation (principle 7):** a person needs name + date of birth (+ location for `NAME_DOB_LOCATION_MATCH`). A company needs name + country. Anything else is REVIEW / INSUFFICIENT_DATA.
+- 4.4 **Several candidate people:** decide the hit for each one. If they all agree, use that decision. Otherwise the decision is REVIEW / AMBIGUOUS_CUSTOMER_RECORD. In both cases `customer_record_id = AMBIGUOUS`.
+- 4.5 **A fixed priority order for reason codes**, so the same code wins on every run.
+- 4.6 **Reason text templates:** 2–4 sentences built from this hit's own facts, e.g. "The customer was born 2004-05-19 (CUS-…); the earliest dated report is 2011-03-02 (H-…), when they were 6."
+- 4.7 **Evidence:** cite only the IDs behind the deciding check, not everything that was looked at.
+
+## Step 5: Evaluation and QA (`tools/`)
+Branch `feat/eval`. Start on day one, because it is how everyone measures progress.
+
+- 5.1 Scorer: the cost matrix from the brief, the share of cost saved compared with all-REVIEW, and the count of unsafe clearances, listed *first*. Use `validate.py --score` once we have it.
+- 5.2 Practice-label diff report: for each wrong hit, show the expected and actual decision, code, record and evidence, plus the label's `path`.
+- 5.3 Spot-check tooling: sample dev hits by reason code so we can eyeball the 770 hits that have no labels.
+- 5.4 **Rare-case fixtures** for policy situations that are rare in dev: deceased hits, companies incorporated after a report, document-number merges, ambiguous joint accounts, single-part names, territories.
+- 5.5 Determinism check: run 5 times and diff the outputs, which must be byte-identical. Also check the runtime is well under 30 minutes.
+
+## Step 6: Documentation and submission
+Branch `docs/readme`.
+
+- 6.1 `system/README.md`: architecture diagram, how each side is resolved, the `Fact`/evidence model, determinism (rule-based; any model calls at temperature 0 with a cache), model and cost, and the time per run.
+- 6.2 Three worked cases (a mismatch, a match and a review case), taken from the dev output.
+- 6.3 Submission hygiene: **the repo is public and has the data in its history.** Purge `datasets/` with `git filter-repo` (or submit from a fresh repo), make sure no API key is committed, and generate `output/dev.jsonl` with the final system.
+
+---
+
+## Using worktrees
+```
+git worktree add ../dsx-names     -b feat/names
+git worktree add ../dsx-customer  -b feat/customer
+git worktree add ../dsx-hit       -b feat/hit
+git worktree add ../dsx-decide    -b feat/decide
+git worktree add ../dsx-eval      -b feat/eval
+```
+- Everyone rebases on `main` after Step 0 merges. `system/model.py` is the contract, so change it only in a small, separate PR.
+- Each step lives in its own files, which avoids merge conflicts. `system/main.py` is the only place they're wired together.
+- Merge to `main` only when the practice-label score doesn't drop and the unsafe-clearance count is 0.
+
+## Suggested split for 4–5 people
+| Person | Takes |
+|---|---|
+| A | Step 0, then 1b + 1c, then 6 |
+| B | 1a names, then 3.4 search results |
+| C | Step 2 customer resolution |
+| D | Step 3 (3.1–3.3, 3.5) hit profile |
+| E | Step 5 eval, then step 4 decision engine with A |
