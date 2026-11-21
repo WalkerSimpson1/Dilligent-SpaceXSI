@@ -166,6 +166,7 @@ Dev set: 457 cleared, 121 matched, 241 review out of 819 hits in about 75 second
 ## Methodology
 
 - [**How Vera works**](docs/HOW_IT_WORKS.md): a 7-minute, plain-language guide to the whole product and its main trade-offs, for non-technical readers.
+- [**Next steps**](docs/plan/NEXT_STEPS.md): the six features planned next, each in its own worktree, with safety rules and done-when checks.
 - [**Step 1 methodology**](docs/plan/STEP1_METHODOLOGY.md): the main name, date and country decisions in plain language.
 - [**Step 2 notes**](docs/plan/STEP2.md): customer resolution.
 - [**Decision log**](docs/plan/DECISIONS.md): every decision with its reason and status.
