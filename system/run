@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Graded entry point: system/run <data folder> <output file>
+# Reads only <data folder>, writes one JSON line per hit to <output file>.
+set -euo pipefail
+if [ "$#" -ne 2 ]; then
+  echo "usage: system/run <data folder> <output file>" >&2
+  exit 2
+fi
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$(command -v python3 || command -v python)"
+export PYTHONHASHSEED=0 PYTHONIOENCODING=utf-8
+exec "$PY" -I "$DIR/main.py" "$1" "$2"
