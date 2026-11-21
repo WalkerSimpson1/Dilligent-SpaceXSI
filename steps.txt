@@ -77,6 +77,8 @@ Branch `feat/customer`, which two people could share (2.1–2.3 / 2.4–2.6).
 - 2.5 **Notes:** collect past countries and cities ("used to live in …") from notes, filed by email, for every record in the person's cluster.
 - 2.6 Build the `CustomerPicture`. If more than one *distinct person* fits, return them all and let step 4 decide whether the alert is AMBIGUOUS.
 - **Test against:** the `path` column of every practice label. Check that you land on the same `customer_record_ids`.
+- **Status:** done (NijBridge), wired into `system/customer.py` and using the Step 1 matchers via `system/customer_compat.py`. 50/50 practice labels (`python tools/check_customers.py`), all 440 alerts in about 27 s.
+- **Open for the team:** single-word preferred names plus Step 1's nickname+typo stacking add spurious people in the no-link search (e.g. "Michael" ~ "Mitchell", "Carlos" ~ "Charlee" on A-A098B5). This is safe (it can only push towards REVIEW) but costs reviews. Decide whether to drop one-part names from the search.
 
 ## Step 3: Hit profile (`system/hit.py`)
 Branch `feat/hit`, which two people could share (3.1–3.3 / 3.4–3.5).
