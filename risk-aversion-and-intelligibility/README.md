@@ -2,7 +2,7 @@
 
 This is a standalone Track 2 design for cautious, explainable clearances. A clearance needs a contradiction allowed by the screening policy and a trace showing that the deciding facts belong to the two entities being compared. A review should tell the analyst which fact needs checking and what the answer could change.
 
-The evaluator and reviewer demo are implemented in [`system/`](system/README.md). From this folder, use `system/run --format csv ../datasets output/dev.jsonl` to reproduce the local predictions or `system/review --demo` to inspect a fictional review and its conditional outcomes.
+The evaluator and reviewer demo now live in the graded [`../system/`](../system/README.md) (merged with Steps 1-3, see DECISIONS.md R1-R7). From the repository root, use `system/run --format csv datasets output/dev.jsonl` to reproduce the local predictions or `system/review --demo` to inspect a fictional review and its conditional outcomes.
 
 | Start here | What it covers |
 |---|---|

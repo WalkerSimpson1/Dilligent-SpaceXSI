@@ -6,6 +6,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from match.names import name_form
+
 
 @lru_cache(maxsize=32768)
 def folded(value):
@@ -19,6 +21,12 @@ def words(value):
 
 @lru_cache(maxsize=32768)
 def name_parts(value):
+    # Cyrillic, Greek, Armenian, Arabic, ... names are compared in Latin letters via the
+    # fixed tables in match/translit.py; otherwise they could never agree with anything.
+    # Unsupported scripts stay as written. DECISIONS.md D-R3.
+    form = name_form(value)
+    if form.non_latin and form.latin:
+        value = form.latin
     value = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', ' ', value)
     value = re.sub(r"\bN\s*[/.-]\s*A\b", ' ', value, flags=re.I)
     value = re.sub(r"['’]", '', value)

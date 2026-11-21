@@ -63,3 +63,22 @@ under that rule, not yet discussed; flag any you disagree with.
 - **Step 3:** 345 of 819 hits have a blank `primary_category`; use the first of `categories` for the listing phrase (policy principle 5).
 - **Steps 4.8 / 7:** non-decisive context worth showing analysts on REVIEW: matching employer vs `position_or_allegation`, ID numbers on the hit, non-Latin aliases with original text. Hit `identifiers` never coincide with KYC document numbers in dev, so they cannot confirm.
 - **Policy:** only name + date of birth (person) or name + country (company) can confirm `SAME_ENTITY`.
+
+## Reconciliation: Sam's evaluator + Steps 1-3 (branch `reconcile/sam`, 2026-11-21)
+
+How each layer was picked: both versions were run over all 819 dev hits, every disagreement was
+listed and sampled by hand against the policy, and each of our candidate pieces was plugged into
+Sam's engine one at a time and re-scored (practice labels + every changed decision read).
+
+| # | Decision | Status | Why / cost |
+|---|---|---|---|
+| R1 | **Sam's evaluator is the graded `system/run`** (`inputs`, `customers`, `facts`, `normalize`, `policy`, `runner`, plus `score` and `review`). Our Step 0-3 modules stay for Vera and as building blocks; `main.py`/`decide.py` are no longer on the graded path. | Decided | Only complete pipeline: 50/50 practice labels, 0 unsafe clearances. Dates agree 100% and countries 99.98% between the two codebases, so nothing is lost there. Sam's spec stays in `risk-aversion-and-intelligibility/`. |
+| R2 | **Bank-side slash dates are read day-first to link and select records** (same phone + same full DOB merge; screened-detail fit). The DOB evidence that can clear a hit keeps both readings (Sam's C05 test). | Decided (swap) + Default (scope) | Same evidence as D1. Fixes 2 practice-label evidence gaps (47 → 49/50) and merges 14 alerts' records the labels treat as one person. Limited to linking after Sam's test showed a day-first comparison could clear `04/05/1994` vs `1994-04-05`; costs one dev match (H-8B7CE3 back to REVIEW). |
+| R3 | **Transliteration (`match/translit.py`) runs in front of Sam's name parts**, so Cyrillic/Greek/Armenian/Georgian/kana names can agree. | Decided | Sam's matcher could never compare them. 0 dev decisions change, but without it a non-Latin alias always "disagrees", which could feed a wrong `NAME_MISMATCH_VERIFIED` on unseen data. |
+| R4 | **Step 3's age reader is a fallback for hit DOBs** (`facts.step3_dobs`): used only when `dobs` is empty and Sam's `text_birth` finds nothing. Ages only (never explicit "born ..." dates). The sentence or snippet must name the subject, name nobody else, and mention no relative. Search results also need the listing phrase and a tied country. | Decided (swap) + Default (guards) | +20 dev decisions (11 `DOB_MISMATCH` clears, 9 matches, all read by hand), 0 label changes. Guards added after Sam's B05 tests caught our reader taking a spouse's or interviewer's birth year. |
+| R5 | **Kept Sam's versions** of customer search (ours let a one-word preferred name select a customer and dropped blank-DOB candidates), dated reports (ours missed lowercase "according to" and double spaces) and dates/countries (identical). | Default | Measured in the layer report. |
+| R6 | **Open: names N7/N8 are not on the graded path.** Sam's matcher allows only identical, listed variant, exact join/split, or edit distance; it does not stack a variant with a typo (N7) or give joined parts a typo allowance (N8). Also N3's "all-non-Latin hit is never a verified-name mismatch" is not enforced (no dev hit has only non-Latin names). | **Needs team call** | Our N7/N8 also produced dubious agreements in the layer report (Starling Bank ~ Starling FS, Markus ~ Marco). |
+| R7 | **Sam's tests run on Windows**: they call `python system/run.py` instead of executing the bash `system/run`. | Default | The bash wrapper is still what graders call. |
+
+Result (CSV dev set): 457 cleared / 121 matched / 241 review (Sam alone: 447 / 112 / 260); 50/50 labels,
+0 unsafe, evidence 49/50; ~75 s; byte-identical across runs and working directories; 117 tests pass.

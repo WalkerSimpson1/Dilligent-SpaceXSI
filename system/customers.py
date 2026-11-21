@@ -1,9 +1,24 @@
 from dataclasses import dataclass
 import re
 
-from facts import BIRTH, BIRTH_MARKER, DateEvidence, Geography, date_evidence, former_residence
+from facts import BIRTH, BIRTH_MARKER, DateEvidence, Geography, former_residence
+from facts import date_evidence
 from inputs import index, source_id, value
-from normalize import COUNTRY_PHRASE, DATE_TEXT, countries, country, dates, entity, name_parts, words
+from normalize import COUNTRY_PHRASE, DATE_TEXT, countries, country, entity, name_parts, words
+from normalize import dates as _dates
+
+# Bank-side slash dates (CRM dob, KYC verified_dob, note dates) are day-first: in the dev
+# data 9,909 slash dates have a first number above 12 and none has a second number above
+# 12. Reading them day-first lets "06/09/1985" and "1985-09-06" merge as one person
+# (same phone + same full DOB) and lets screened details pick the customer, which the
+# practice labels expect. The convention is inferred, not documented, so it is used ONLY
+# to link and select records. The DOB evidence that can clear a hit (date_evidence) keeps
+# every reading, so a month-first record can never cause a wrong clearance. DECISIONS.md D-R2.
+SLASH_DAY_FIRST = True
+
+
+def dates(raw, day_first=None):
+    return _dates(raw, SLASH_DAY_FIRST)
 
 
 @dataclass(frozen=True)

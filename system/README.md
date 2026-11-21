@@ -4,26 +4,26 @@ This Python 3.10+ implementation runs offline with only the Python standard libr
 
 ## Run
 
-Run these commands from `risk-aversion-and-intelligibility/`.
+Run these commands from the repository root.
 
 ```sh
 # Official entry point when the original delivery is available
 system/run /path/to/dev output/dev.jsonl
 
 # Reproduce the available local run
-system/run --format csv ../datasets output/dev.jsonl
-system/score output/dev.jsonl '../datasets/Screening Dev Set - browse - Practice labels.csv'
+system/run --format csv datasets output/dev.jsonl
+system/score output/dev.jsonl 'datasets/Screening Dev Set - browse - Practice labels.csv'
 
 # Compare with the same rules before optional free-text evidence extraction
-system/run --format csv --structured-only ../datasets output/structured.jsonl
-system/score output/structured.jsonl '../datasets/Screening Dev Set - browse - Practice labels.csv'
+system/run --format csv --structured-only datasets output/structured.jsonl
+system/score output/structured.jsonl 'datasets/Screening Dev Set - browse - Practice labels.csv'
 
 # Run tests and the fictional review
-python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v   # includes our Step 1-3 tests
 system/review --demo
 
 # Inspect a local hit with an optional hypothetical DOB from its original listing
-system/review ../datasets HIT_ID --listing-dob 1994-07-12 --listing-dob unknown
+system/review datasets HIT_ID --listing-dob 1994-07-12 --listing-dob unknown
 ```
 
 `run` detects the local CSV layout if the JSONL alert table is absent. Use `--format` to select a particular adapter when both are present. The JSONL input expects the eight tables identified in the brief, `POLICY.md` and `name_variants.json`. The rules implement the v3 procedure and the name tables are read from the supplied data folder. The `score` command is the only command that reads practice labels.
@@ -48,7 +48,7 @@ Outputs in `output/` are ignored by Git. The local predictions use participant-p
 
 ## Local verification results
 
-The full CSV run produced 819 hit decisions across 440 alerts, with 447 different-entity decisions, 112 matches, and 260 reviews. It took 33.4 seconds. A second run launched from a different working directory took 33.1 seconds and produced byte-identical JSONL. The implementation passed 21 synthetic tests, with additional variations within those tests.
+After merging with Steps 1-3 (DECISIONS.md R1-R7) the full CSV run produces 819 hit decisions across 440 alerts: 457 different-entity decisions, 121 matches and 241 reviews (Sam's evaluator alone: 447 / 112 / 260), in about 75 seconds. Runs from different working directories produce byte-identical JSONL. 117 tests pass (Sam's synthetic acceptance cases, the Step 1-3 unit tests and the merge tests). The table below is from the evaluator before the merge; after it, the full evaluator still scores 50 of 50 with 0 unsafe clearances and 49 of 50 reference evidence sets.
 
 | Practice-set measure | Structured-only baseline | Full evaluator |
 |---|---:|---:|

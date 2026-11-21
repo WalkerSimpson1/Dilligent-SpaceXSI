@@ -1,5 +1,14 @@
 # Work plan: Same Person or Not? (Track 2)
 
+> **Status after reconciliation (2026-11-21, DECISIONS.md R1-R7).** The graded `system/run` is now Sam's
+> evaluator (`system/runner.py` and friends) with three pieces from Steps 1-3 built in: transliteration
+> (1a), day-first bank slash dates for record linking (1b/2.3), and Step 3's age reader as a hit-DOB
+> fallback (3.2/3.4). Steps 0, 2 (customer resolution), 4 (decision engine) and 5.1 (scorer: `system/score`)
+> are covered by Sam's code; `main.py`/`decide.py`/`customer.py` stay for Vera only. Still open: names
+> N7/N8 (R6), wiring Vera (Step 7) to the new engine, Step 5.2-5.5 tooling, Step 6 docs and data purge.
+> Rule for changes from here: a swap stays only if `system/score` keeps 0 unsafe clearances and every
+> newly changed clearance has been read.
+
 The pipeline has one decision per hit, and each stage feeds the next:
 
 ```

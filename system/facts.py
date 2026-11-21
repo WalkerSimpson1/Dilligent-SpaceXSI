@@ -2,8 +2,10 @@ from dataclasses import dataclass, field
 import re
 
 from inputs import list_values, source_id, value
-from normalize import (COUNTRY_PHRASE, DATE_TEXT, MONTH, YEAR, PartialDate, countries, country,
+from normalize import (COUNTRY_PHRASE, DATE_TEXT, MONTH, MONTHS, YEAR, PartialDate, countries, country,
                        country_end, dates, entity, present, words)
+
+MONTH_WORDS = {words(m) for m in MONTHS} | {'a', 'an', 'the'}
 
 
 @dataclass(frozen=True)
@@ -269,6 +271,66 @@ def query_key(value):
     return ' '.join(sorted(words(value).split()))
 
 
+def _names_someone_else(text, names):
+    """A run of two or more capitalised words with no part of the subject's names, such as
+    "Taylor Reed" or "Federal Court", after dropping months and articles. Errs towards
+    True, which only withholds a date."""
+    subject = {part for name in names for part in name.split()}
+    run = []
+    for token in re.findall(r"[^\W\d_][\w'’-]*|\S", text) + ['.']:
+        if token[0].isupper() and words(token) not in MONTH_WORDS:
+            run.append(words(token))
+            continue
+        if len(run) >= 2 and not subject & set(run) and not country(' '.join(run)):
+            return True
+        run = []
+    return False
+
+
+def _about_subject(text, names):
+    """The text names the listed subject and nobody else, and mentions no relative or
+    associate, so an age in it describes the subject (failure mode B05)."""
+    return (named_subject(text, names) and not THIRD_PARTY.search(text)
+            and not _names_someone_else(text, names))
+
+
+def step3_dobs(row, hit_id, hit_countries, search_index, names):
+    """Fallback birth years from Step 3's age reader (system/hit.py) when the readers above
+    find none and the structured dobs field is empty. Same policy order: the first paragraph
+    of the profile notes, then supplied search results that carry the category's listing
+    phrase and a country tied to the hit. Only ages tied to a date count ("at which point he
+    was 27"), never explicit "born ..." dates, which text_birth already reads with attribution
+    checks; every sentence or snippet must pass _about_subject. Returns {PartialDate: source}.
+    DECISIONS.md D-R4."""
+    import hit as step3
+    from match import countries as step3_countries
+
+    found = {}
+
+    def add(year, source):
+        found.setdefault(PartialDate(year), source)
+
+    for sentence in step3._sentences(step3.first_paragraph(value(row, 'profile_notes'))):
+        if _about_subject(sentence, names):
+            for year, _, _ in step3.birth_years_from_sentence(sentence):
+                add(year, hit_id)
+    if found or not hit_countries:
+        return found
+    name = value(row, 'name')
+    phrase = step3.listing_phrase(step3.category(row))
+    exclude = [name, query_key(name), *(a for a in list_values(row, 'aliases') if isinstance(a, str))]
+    for result in sorted(search_index.get(query_key(name), ()), key=lambda r: source_id(r, 'result_id')):
+        snippet = value(result, 'snippet')
+        if phrase not in snippet.lower() or not _about_subject(snippet, names):
+            continue
+        text = ' '.join([value(result, 'title'), snippet])
+        if not step3_countries.find_in_text(text, exclude_names=exclude) & hit_countries:
+            continue
+        for year, _, _ in step3.birth_years_from_sentence(snippet):
+            add(year, source_id(result, 'result_id'))
+    return found
+
+
 def build_hit(row, search_index, *, workbook=False, text_extraction=True):
     hit_id = source_id(row, 'hit_id')
     kind = entity(value(row, 'entity_type'))
@@ -310,6 +372,11 @@ def build_hit(row, search_index, *, workbook=False, text_extraction=True):
             dob = DateEvidence(tuple(sorted(parsed)), tuple(sorted(deciding)), uncertain)
             if rejected and not dob.values:
                 problems.extend(sorted(rejected, key=lambda issue: ('lacks a country' not in issue, issue)))
+    if text_extraction and kind == 'person' and not dob.values and not list_values(row, 'dobs'):
+        found = step3_dobs(row, hit_id, set(geography.sources), search_index, normalized_names)
+        if found:
+            dob = DateEvidence(tuple(sorted(found)), tuple(sorted(set(found.values()))), False)
+            problems = [p for p in problems if 'search result' not in p]
     if dob.uncertain:
         problems.append('The listing has birth information that cannot be read confidently')
     report_candidates = []

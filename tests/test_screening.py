@@ -233,6 +233,48 @@ class ScreeningTests(unittest.TestCase):
                 table['hits'][0]['profile_notes'] = sentence
                 self.verdict(table, MATCH)
 
+    def test_step3_age_fallback_reads_only_the_subject(self):
+        # D-R4: Step 3's age reader fills in when text_birth finds nothing. B05 still holds.
+        table = scenario(profile_notes='Questioning of Alex Morgan occurred in June 2006, at which point he was 27.')
+        self.assertEqual(self.batch(table).evidence('H1')[2].dob.values, (PartialDate(1978), PartialDate(1979)))
+        self.verdict(table, CLEAR, 'DOB_MISMATCH')
+        for sentence in ('The spouse of Alex Morgan was questioned in June 2006, at which point she was 27.',
+                         'Alex Morgan interviewed Taylor Reed in June 2006, at which point he was 27.',
+                         'Questioning occurred in June 2006, at which point he was 27.'):
+            with self.subTest(sentence=sentence):
+                table['hits'][0]['profile_notes'] = sentence
+                self.verdict(table, REVIEW)
+
+    def test_step3_search_age_needs_phrase_country_and_subject(self):
+        # D-R4: a supplied search result counts only with the category phrase, a tied country
+        # and the listed subject as the only person named.
+        table = scenario()
+        result = dict(result_id='SR-1', query='alex morgan', title='Alex Morgan - report',
+                      snippet='A public report throughout March 2009 listed Alex Morgan, 30, as a sanctioned individual from United Kingdom.')
+        table['search_results'] = [result]
+        self.verdict(table, CLEAR, 'DOB_MISMATCH')
+        for snippet in ('A public report throughout March 2009 listed Alex Morgan, 30, as named in adverse media from United Kingdom.',
+                        'A public report throughout March 2009 listed Alex Morgan, 30, as a sanctioned individual from Spain.',
+                        'A March 2009 report listed Taylor Reed, 30, with Alex Morgan as a sanctioned individual from United Kingdom.'):
+            with self.subTest(snippet=snippet):
+                result['snippet'] = snippet
+                self.verdict(table, REVIEW)
+
+    def test_slash_dates_link_records_but_never_clear_alone(self):
+        # D-R2: day-first merges 06/09/1985 with 1985-09-06 (same phone); C05 still holds.
+        table = scenario(dobs=['1994-04-05'])
+        table['kyc_checks'] = []
+        table['customers'][0]['dob'] = '04/05/1994'
+        self.verdict(table, REVIEW)
+        from customers import Customers
+        table = scenario()
+        table['customers'] = [customer('C1', dob='06/09/1985', phone='+44 7700 900123'),
+                              customer('C2', dob='1985-09-06', phone='+44 7700 900123')]
+        with TemporaryDirectory() as folder:
+            save(Path(folder), table)
+            people = Customers(Dataset(Path(folder), 'jsonl'))
+        self.assertEqual(people.root['C1'], people.root['C2'])
+
     def test_profile_birth_alternatives_and_independent_subjects(self):
         self.verdict(scenario(profile_notes='Alex Morgan was born in either 1961 or 1994.'), MATCH)
         self.verdict(scenario(profile_notes='Alex Morgan was born in 1961, or 1994.'), MATCH)
@@ -357,7 +399,7 @@ class ScreeningTests(unittest.TestCase):
             output = root / 'output.jsonl'
             table = scenario(dobs=['1961'])
             save(data, table)
-            command = [SYSTEM / 'run', data, output]
+            command = [sys.executable, '-I', SYSTEM / 'run.py', data, output]
             subprocess.run(command, cwd='/', check=True, capture_output=True)
             before = output.read_bytes()
             (data / 'practice_labels.jsonl').write_text('intentionally invalid\n', encoding='utf-8')
@@ -379,7 +421,7 @@ class ScreeningTests(unittest.TestCase):
 
     def test_demo_conditional_outputs_leave_current_status_in_review(self):
         # D03
-        result = subprocess.run([SYSTEM / 'review', '--demo'], check=True, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, SYSTEM / 'review', '--demo'], check=True, capture_output=True, text=True)
         current, previews = result.stdout.split('Conditional outcomes')
         self.assertIn('REVIEW (INSUFFICIENT_DATA)', current)
         self.assertIn('Check the birth date in the original listing', current)
