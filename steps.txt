@@ -109,9 +109,9 @@ Branch `docs/readme`.
 ## Step 7: Analyst extras: explain command and info-request emails
 Branch `feat/extras`. Build it late, by whoever finishes first. **Rule: nothing here may change `output/dev.jsonl` or the graded `system/run`.**
 
-- 7.1 `system/screen` command with subcommands, kept separate from the graded `system/run <data> <out>`:
-  - `system/screen explain <hit_id>`: prints the customer and hit pictures, every check that fired or didn't, and the evidence IDs.
-  - `system/screen emails <output.jsonl> --out emails/`: drafts emails for REVIEW hits.
+- 7.1 **Vera** (`vera` command, `system/vera/`), kept separate from the graded `system/run <data> <out>`. Started on `feat/vera-ui`:
+  - hit screen + decision tree (`t`): shows the customer and hit pictures, every check that fired or didn't, and the evidence IDs.
+  - email drafts per hit (`e`) and for all REVIEW hits; analyst decisions (`d`); decision guide.
 - 7.2 **Email recipients and tipping off:** drafts go to the internal analyst or KYC team. A customer-facing version must be a neutral "please update your details" request that **never mentions screening, watchlists, sanctions or PEPs**, because telling a customer can count as tipping off under anti-money-laundering rules.
 - 7.3 **One template per missing fact (from 4.8):**
   - no date of birth on file → request date of birth / ID document
