@@ -1,8 +1,8 @@
 # For Sam: one crashing hit fails the whole graded run
 
-**Status:** open, owner Sam (docs/plan/DECISIONS.md R10). Found during the 2026-11-21 reconciliation. It was skipped then because the fix changes the graded path.
+**Resolved (R10).** The graded runner and Vera now use the same per-hit fallback in `Batch.decision()`. A failed evaluation or clearance replay produces `REVIEW` with `INSUFFICIENT_DATA` and cites the alert and hit IDs. The fallback keeps the resolved customer ID or `AMBIGUOUS` when resolution has already succeeded. Diagnostics report the hit ID, exception class, and fallback count. See [R10 in the decision log](docs/plan/DECISIONS.md).
 
-## The problem
+## Original problem
 
 If deciding **any single hit** raises an exception, `system/run` writes **no output file at all**. On the unseen set, one unexpected value (an odd date, a missing field, a new list shape) would take the score to zero instead of costing one review.
 
@@ -25,12 +25,12 @@ The old Step 0 pipeline handled this per hit (`system/steps/main.py`, `safe_revi
 6. **Use the same helper in Vera.** `engine_bridge.decide_all()` should use it, so Vera and `system/run` stay byte-identical.
 7. **Stay deterministic.** No timestamps or exception text that varies between runs in the graded row.
 
-## How to check it
+## Verification
 
 ```bash
-python -m unittest discover -s tests -t .        # 122 tests pass today
-system/run datasets output/dev.jsonl             # must stay byte-identical (457 / 121 / 241)
-tools/score output/dev.jsonl "datasets/Screening Dev Set - browse - Practice labels.csv"   # 50/50, 0 unsafe
+python3 -E -s -S -m unittest discover -s tests -t .
+system/run datasets output/dev.jsonl
+tools/score output/dev.jsonl "datasets/Screening Dev Set - browse - Practice labels.csv"
 ```
 
-Add a test: make one hit's evaluation raise (e.g. patch `engine.s5_batch.build_hit` to raise for `H1` only, or feed a field shape the parser can't take). Expect exit 0, that hit `REVIEW`/`INSUFFICIENT_DATA` with evidence `[alert_id, hit_id]`, and every other hit unchanged. Add one for the replay `ValueError` too.
+The 126 tests include simulated parsing and customer-resolution failures, an actual failed clearance replay, and byte-identical CLI and Vera output when one hit falls back. Existing tests cover atomic failure for invalid inventories. The full 819-hit workbook run was byte-identical to the run on `2f28f47`, with 457 clearances, 121 matches, 241 reviews, and zero fallbacks. All 50 practice decisions were correct, with zero unsafe clearances on those labels. [Regression tests](tests/test_engine/test_batch_errors.py)

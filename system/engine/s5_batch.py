@@ -10,7 +10,7 @@ from time import monotonic
 from engine.s2_customers import Customers
 from engine.s3_hit_facts import build_hit, date_evidence, query_key
 from engine.s1_load import Dataset, InputError, index, list_values, value
-from engine.s4_decide import CLEAR, CODES, decide
+from engine.s4_decide import CLEAR, CODES, REVIEW, Decision, Finding, decide
 
 
 OUTPUT_FIELDS = {'alert_id', 'hit_id', 'decision', 'reason_code', 'customer_record_id', 'reason', 'evidence'}
@@ -23,22 +23,37 @@ class Batch:
         self.customers = Customers(data, text_extraction=text_extraction)
         self.search = index(data.tables['search_results'], lambda row: query_key(value(row, 'query')))
         self.hit_to_alert = {hit: alert for alert, hit in data.inventory}
-        self.alert_inputs = {}
+        self.resolved_customers = {}
+        self.screening_dates = {}
+        self.fallbacks = set()
 
     def evidence(self, hit_id):
         alert_id = self.hit_to_alert[hit_id]
         alert = self.data.alerts[alert_id]
-        if alert_id not in self.alert_inputs:
-            self.alert_inputs[alert_id] = (self.customers.resolve(alert),
-                                           date_evidence(list_values(alert, 'screened_at'), (alert_id,)))
-        customers, screening_date = self.alert_inputs[alert_id]
+        if alert_id not in self.resolved_customers:
+            self.resolved_customers[alert_id] = self.customers.resolve(alert)
+        if alert_id not in self.screening_dates:
+            self.screening_dates[alert_id] = date_evidence(list_values(alert, 'screened_at'), (alert_id,))
         hit = build_hit(self.data.hits[hit_id], self.search,
                         workbook=self.data.mode == 'csv', text_extraction=self.text_extraction)
-        return alert_id, customers, hit, screening_date
+        return alert_id, self.resolved_customers[alert_id], hit, self.screening_dates[alert_id]
 
     def decision(self, hit_id):
-        alert_id, customers, hit, screened = self.evidence(hit_id)
-        return decide(customers, hit, screened, self.data.names, alert_id=alert_id)
+        alert_id = self.hit_to_alert[hit_id]
+        self.fallbacks.discard(hit_id)
+        try:
+            _, customers, hit, screened = self.evidence(hit_id)
+            return decide(customers, hit, screened, self.data.names, alert_id=alert_id)
+        except Exception as exc:
+            self.fallbacks.add(hit_id)
+            print(f'Hit {hit_id!r} evaluation failed ({type(exc).__name__})', file=sys.stderr)
+            customers = self.resolved_customers.get(alert_id, ())
+            customer_id = customers[0].id if len(customers) == 1 else 'AMBIGUOUS' if customers else None
+            finding = Finding(REVIEW, 'INSUFFICIENT_DATA',
+                              ('The system could not evaluate this hit.',
+                               'An analyst should review the source records.'),
+                              (alert_id, hit_id))
+            return Decision(finding, customer_id, ())
 
     def rows(self):
         rows = []
@@ -126,6 +141,7 @@ def main(argv=None):
         print(f'Screening run failed ({type(exc).__name__}). {exc}', file=sys.stderr)
         return 1
     print(f'{data.mode.upper()} | {len(rows)} hits | {len(data.alerts)} alerts | '
-          f'{cleared_alerts} cleared alerts | {dict(sorted(decisions.items()))} | {monotonic()-start:.2f}s',
+          f'{cleared_alerts} cleared alerts | {dict(sorted(decisions.items()))} | '
+          f'fallbacks={len(batch.fallbacks)} | {monotonic()-start:.2f}s',
           file=sys.stderr)
     return 0

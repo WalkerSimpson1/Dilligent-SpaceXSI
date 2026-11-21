@@ -107,16 +107,19 @@ def _missing(blockers) -> list[str]:
     return codes
 
 
-def to_vera(alert_id: str, hit_id: str, engine_decision) -> Decision:
+def to_vera(alert_id: str, hit_id: str, engine_decision, *, evaluation_failed=False) -> Decision:
     """One engine Decision -> Vera's Decision (same graded fields, plus checks and missing)."""
     finding = engine_decision.finding
     split = finding.code == "AMBIGUOUS_CUSTOMER_RECORD"
-    first = engine_decision.candidates[0][1] if engine_decision.candidates and not split else None
-    checks = _checks(first, len(engine_decision.candidates), engine_decision.customer_id)
-    if split:  # candidates disagree: the tree stops at "Customer record"
+    if evaluation_failed:
+        checks = [(name, 'skip', 'evaluation interrupted') for name in CHECK_ORDER]
+    elif split:  # candidates disagree: the tree stops at "Customer record"
         outcomes = ", ".join(f"{cid}: {r.finding.decision}" for cid, r in engine_decision.candidates)
         checks = [(n, "fired", f"candidates disagree ({outcomes})") if n == "Customer record"
-                  else (n, "skip", "decided per candidate") for n, _, _ in checks]
+                  else (n, "skip", "decided per candidate") for n in CHECK_ORDER]
+    else:
+        first = engine_decision.candidates[0][1] if engine_decision.candidates else None
+        checks = _checks(first, len(engine_decision.candidates), engine_decision.customer_id)
     d = Decision(hit_id=hit_id, alert_id=alert_id, decision=finding.decision, reason_code=finding.code,
                  customer_record_id=engine_decision.customer_id, reason=" ".join(finding.sentences),
                  evidence=list(finding.evidence),
@@ -141,7 +144,7 @@ def decide_all(folder: str, on_hit=None):
         rows.append(dict(alert_id=alert_id, hit_id=hit_id, decision=f.decision, reason_code=f.code,
                          customer_record_id=engine_decision.customer_id, reason=" ".join(f.sentences),
                          evidence=list(f.evidence)))
-        decisions.append(to_vera(alert_id, hit_id, engine_decision))
+        decisions.append(to_vera(alert_id, hit_id, engine_decision, evaluation_failed=hit_id in batch.fallbacks))
     verify_rows(data, rows)
     return decisions, rows, data
 
